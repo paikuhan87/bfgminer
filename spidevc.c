@@ -54,10 +54,14 @@
 
 #ifdef HAVE_LINUX_SPI
 bool sys_spi_txrx(struct spi_port *port);
+static bool gpio_spi_txrx(struct spi_port *);
 static volatile unsigned *gpio;
 #endif
 
 struct spi_port *sys_spi;
+
+#define INP_GPIO(g) *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
+#define OUT_GPIO(g) *(gpio+((g)/10)) |=  (1<<(((g)%10)*3))
 
 void spi_init(void)
 {
@@ -79,8 +83,15 @@ void spi_init(void)
 	
 	sys_spi = malloc(sizeof(*sys_spi));
 	*sys_spi = (struct spi_port){
-		.txrx = sys_spi_txrx,
+		.txrx = gpio_spi_txrx,
+		.sclk = 11,
+		.mosi = 10,
+		.miso =  9,
+		.speed = 4000000,
 	};
+	INP_GPIO(10); OUT_GPIO(10);
+	INP_GPIO(11); OUT_GPIO(11);
+	INP_GPIO(9);
 #endif
 }
 
@@ -92,6 +103,23 @@ void spi_init(void)
 
 #define GPIO_SET *(gpio+7)  // sets   bits which are 1 ignores bits which are 0
 #define GPIO_CLR *(gpio+10) // clears bits which are 1 ignores bits which are 0
+#define GPIO_LEV *(gpio+13)
+
+static inline
+void gpio_assign(int bit, bool nv)
+{
+	unsigned mask = 1 << bit;
+	if (nv)
+		GPIO_SET = mask;
+	else
+		GPIO_CLR = mask;
+}
+
+static inline
+bool gpio_get(int bit)
+{
+	return GPIO_LEV & (1 << bit);
+}
 
 // Bit-banging reset, to reset more chips in chain - toggle for longer period... Each 3 reset cycles reset first chip in chain
 static
@@ -194,6 +222,40 @@ bool sys_spi_txrx(struct spi_port *port)
 	close(fd);
 	spi_reset(4321);
 
+	return true;
+}
+
+static
+bool gpio_spi_txrx(struct spi_port * const port)
+{
+	const uint8_t *wrbuf = spi_gettxbuf(port);
+	uint8_t *rdbuf = spi_getrxbuf(port);
+	size_t bufsz = spi_getbufsz(port);
+	const uint64_t read_delay = 1000000 / port->speed;
+	int i;
+	
+	// reset
+	gpio_assign(port->sclk, true);
+	for (i = 0; i < 78*3; ++i)
+	{
+		gpio_assign(port->mosi, true);
+		gpio_assign(port->mosi, false);
+	}
+	gpio_assign(port->sclk, false);
+	
+	for ( ; bufsz; --bufsz, ++rdbuf, ++wrbuf)
+	{
+		rdbuf[0] = 0;
+		for (i = 0x80; i; i >>= 1)
+		{
+			gpio_assign(port->mosi, wrbuf[0] & i);
+			gpio_assign(port->sclk, true);
+			cgsleep_us(read_delay);
+			if (gpio_get(port->miso))
+				rdbuf[0] |= i;
+			gpio_assign(port->sclk, false);
+		}
+	}
 	return true;
 }
 

@@ -22,6 +22,10 @@ struct spi_port {
 	const char *repr;
 	int logprio;
 	
+	int sclk;
+	int mosi;
+	int miso;
+	
 	int fd;
 	uint32_t speed;
 	uint16_t delay;
