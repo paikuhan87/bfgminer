@@ -36,6 +36,8 @@ struct spi_port {
 extern struct spi_port *sys_spi;
 
 
+extern void spi_init_gpio(struct spi_port *);
+
 /* SPI BUFFER OPS */
 static inline
 void spi_clear_buf(struct spi_port *port)

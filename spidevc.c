@@ -54,14 +54,10 @@
 
 #ifdef HAVE_LINUX_SPI
 bool sys_spi_txrx(struct spi_port *port);
-static bool gpio_spi_txrx(struct spi_port *);
 static volatile unsigned *gpio;
 #endif
 
 struct spi_port *sys_spi;
-
-#define INP_GPIO(g) *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
-#define OUT_GPIO(g) *(gpio+((g)/10)) |=  (1<<(((g)%10)*3))
 
 void spi_init(void)
 {
@@ -83,15 +79,12 @@ void spi_init(void)
 	
 	sys_spi = malloc(sizeof(*sys_spi));
 	*sys_spi = (struct spi_port){
-		.txrx = gpio_spi_txrx,
+		.txrx = sys_spi_txrx,
 		.sclk = 11,
 		.mosi = 10,
 		.miso =  9,
 		.speed = 4000000,
 	};
-	INP_GPIO(10); OUT_GPIO(10);
-	INP_GPIO(11); OUT_GPIO(11);
-	INP_GPIO(9);
 #endif
 }
 
@@ -257,6 +250,14 @@ bool gpio_spi_txrx(struct spi_port * const port)
 		}
 	}
 	return true;
+}
+
+void spi_init_gpio(struct spi_port * const port)
+{
+	port->txrx = gpio_spi_txrx;
+	INP_GPIO(port->sclk); OUT_GPIO(port->sclk);
+	INP_GPIO(port->mosi); OUT_GPIO(port->mosi);
+	INP_GPIO(port->miso);
 }
 
 #endif

@@ -39,39 +39,79 @@
 
 BFG_REGISTER_DRIVER(bitfury_drv)
 
+static char *bitfury_spi_port_config(struct cgpu_info *, char *, char *, char *);
+
+static
+bool bitfury_gpio_detect_one(const char * const devpath)
+{
+	int chip_n;
+	struct cgpu_info *bitfury;
+	struct spi_port * const port = malloc(sizeof(*port));
+	*port = *sys_spi;
+	
+	{
+		struct bitfury_device dummy_bitfury = {
+			.spi = port,
+		};
+		drv_set_defaults(&bitfury_drv, bitfury_spi_port_config, &dummy_bitfury);
+	}
+	
+	// sclk,mosi,miso[,spidev]
+	char *p, *q;
+	port->sclk = strtol(devpath, &p, 0);
+	if (p == devpath || p[0] != ',')
+		goto perr;
+	port->mosi = strtol(&p[1], &q, 0);
+	if (q == &p[1] || q[0] != ',')
+		goto perr;
+	port->miso = strtol(&q[1], &p, 0);
+	if (p == &q[1] || (p[0] && p[0] != ','))
+		goto perr;
+	if (p[0] == ',')
+	{
+		// TODO: last param (optional): Linux SPI device
+	}
+	else
+		spi_init_gpio(port);
+	
+	chip_n = libbitfury_detectChips1(port);
+	if (!chip_n)
+		goto err;
+	
+	bitfury = malloc(sizeof(*bitfury));
+	*bitfury = (struct cgpu_info){
+		.drv = &bitfury_drv,
+		.threads = 1,
+		.procs = chip_n,
+		.device_data = port,
+	};
+	return add_cgpu(bitfury);
+
+perr:
+	applog(LOG_DEBUG, "%s: Error parsing \"%s\"", __func__, devpath);
+err:
+	free(port);
+	return false;
+}
+
 static
 int bitfury_autodetect()
 {
 	RUNONCE(0);
 	
-	int chip_n;
-	struct cgpu_info *bitfury_info;
-
-	bitfury_info = calloc(1, sizeof(struct cgpu_info));
-	bitfury_info->drv = &bitfury_drv;
-	bitfury_info->threads = 1;
-
-	applog(LOG_INFO, "INFO: bitfury_detect");
-	spi_init();
-	if (!sys_spi)
+	if (!bitfury_gpio_detect_one("11,10,9,/dev/spidev0.0"))
 		return 0;
-	chip_n = libbitfury_detectChips1(sys_spi);
-	if (!chip_n) {
-		applog(LOG_WARNING, "No Bitfury chips detected!");
-		return 0;
-	} else {
-		applog(LOG_WARNING, "BITFURY: %d chips detected!", chip_n);
-	}
-
-	bitfury_info->procs = chip_n;
-	add_cgpu(bitfury_info);
 	
 	return 1;
 }
 
 static void bitfury_detect(void)
 {
-	noserial_detect_manual(&bitfury_drv, bitfury_autodetect);
+	spi_init();
+	if (!sys_spi)
+		return;
+	
+	generic_detect(&bitfury_drv, bitfury_gpio_detect_one, bitfury_autodetect, GDF_REQUIRE_DNAME | GDF_DEFAULT_NOAUTO);
 }
 
 
@@ -185,11 +225,12 @@ bool bitfury_init(struct thr_info *thr)
 	
 	for (proc = thr->cgpu; proc; proc = proc->next_proc)
 	{
-		bitfury = proc->device_data = malloc(sizeof(struct bitfury_device));
+		bitfury = malloc(sizeof(struct bitfury_device));
 		*bitfury = (struct bitfury_device){
-			.spi = sys_spi,
+			.spi = proc->device_data,
 			.fasync = proc->proc_id,
 		};
+		proc->device_data = bitfury;
 		bitfury_init_chip(proc);
 		bitfury->osc6_bits = 50;
 		bitfury_send_reinit(bitfury->spi, bitfury->slot, bitfury->fasync, bitfury->osc6_bits);
@@ -681,16 +722,10 @@ bool _bitfury_set_device_parse_setting(uint32_t * const rv, char * const setting
 	return true;
 }
 
-char *bitfury_set_device(struct cgpu_info * const proc, char * const option, char * const setting, char * const replybuf)
+static
+char *bitfury_spi_port_config(struct cgpu_info * const proc, char *option, char *setting, char *replybuf)
 {
 	struct bitfury_device * const bitfury = proc->device_data;
-	uint32_t newval;
-	
-	if (!strcasecmp(option, "help"))
-	{
-		sprintf(replybuf, "baud: SPI baud rate\nosc6_bits: range 1-%d (slow to fast)", BITFURY_MAX_OSC6_BITS);
-		return replybuf;
-	}
 	
 	if (!strcasecmp(option, "baud"))
 	{
@@ -699,6 +734,22 @@ char *bitfury_set_device(struct cgpu_info * const proc, char * const option, cha
 		
 		return NULL;
 	}
+}
+
+char *bitfury_set_device(struct cgpu_info * const proc, char * const option, char * const setting, char * const replybuf)
+{
+	struct bitfury_device * const bitfury = proc->device_data;
+	char *rv;
+	uint32_t newval;
+	
+	if (!strcasecmp(option, "help"))
+	{
+		sprintf(replybuf, "baud: SPI baud rate\nosc6_bits: range 1-%d (slow to fast)", BITFURY_MAX_OSC6_BITS);
+		return replybuf;
+	}
+	
+	if ( (rv = bitfury_spi_port_config(proc, option, setting, replybuf)) )
+		return rv;
 	
 	if (!strcasecmp(option, "osc6_bits"))
 	{
