@@ -44,6 +44,7 @@ static char *bitfury_spi_port_config(struct cgpu_info *, char *, char *, char *)
 static
 bool bitfury_gpio_detect_one(const char * const devpath)
 {
+	static struct cgpu_info *prev_cgpu = NULL;
 	int chip_n;
 	struct cgpu_info *bitfury;
 	struct spi_port * const port = malloc(sizeof(*port));
@@ -81,11 +82,13 @@ bool bitfury_gpio_detect_one(const char * const devpath)
 	bitfury = malloc(sizeof(*bitfury));
 	*bitfury = (struct cgpu_info){
 		.drv = &bitfury_drv,
-		.threads = 1,
+		.threads = prev_cgpu ? 0 : 1,
 		.procs = chip_n,
 		.device_data = port,
 	};
-	return add_cgpu(bitfury);
+	const bool rv = add_cgpu_slave(bitfury, prev_cgpu);
+	prev_cgpu = bitfury;
+	return rv;
 
 perr:
 	applog(LOG_DEBUG, "%s: Error parsing \"%s\"", __func__, devpath);
