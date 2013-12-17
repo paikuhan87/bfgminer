@@ -267,8 +267,8 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 	for (spi_num = 0; spi_num < spis_count; ++spi_num)
 	{
 		port = spis[spi_num];
-		all_sclk |= port->sclk;
-		all_mosi |= port->mosi;
+		all_sclk |= 1 << port->sclk;
+		all_mosi |= 1 << port->mosi;
 	}
 	
 	// reset all at once
@@ -293,27 +293,28 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 			{
 				if (pos == bufsz)
 					// In case the sclk is shared, ensure mosi is low
-					do_clr[0] |= port->mosi;
+					do_clr[0] |= 1 << port->mosi;
 				continue;
 			}
 			
-			active_sclk |= port->sclk;
+			active_sclk |= 1 << port->sclk;
 			for (i = 7; i >= 0; --i)
 			{
 				wrbuf = spi_gettxbuf(port);
 				if (wrbuf[pos] & (1 << i))
-					do_set[i] |= port->mosi;
+					do_set[i] |= 1 << port->mosi;
 				else
-					do_clr[i] |= port->mosi;
+					do_clr[i] |= 1 << port->mosi;
 			}
 		}
 		
 		if (!active_sclk)
 			break;
 		
+		do_set[0] |= active_sclk;
 		for (i = 7; i >= 0; --i)
 		{
-			GPIO_SET = active_sclk | do_set[i];
+			GPIO_SET = do_set[i];
 			if (do_clr[i])
 				GPIO_CLR = do_clr[i];
 			// TODO: delay?
@@ -331,7 +332,7 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 			rdbuf = spi_getrxbuf(port);
 			rdbuf[pos] = 0;
 			for (i = 7; i >= 0; --i)
-				if (in_lev[i] & port->miso)
+				if (in_lev[i] & (1 << port->miso))
 					rdbuf[pos] |= (1 << i);
 		}
 	}
