@@ -293,7 +293,7 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 			{
 				if (pos == bufsz)
 					// In case the sclk is shared, ensure mosi is low
-					do_clr[0] |= 1 << port->mosi;
+					do_clr[7] |= 1 << port->mosi;
 				continue;
 			}
 			
@@ -311,7 +311,7 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 		if (!active_sclk)
 			break;
 		
-		do_set[0] |= active_sclk;
+		do_set[7] |= active_sclk;
 		for (i = 7; i >= 0; --i)
 		{
 			GPIO_SET = do_set[i];
