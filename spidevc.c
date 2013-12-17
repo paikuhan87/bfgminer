@@ -51,6 +51,7 @@
 #endif
 
 #include "logging.h"
+#include "util.h"
 
 #ifdef HAVE_LINUX_SPI
 bool sys_spi_txrx(struct spi_port *port);
@@ -224,7 +225,6 @@ bool gpio_spi_txrx(struct spi_port * const port)
 	const uint8_t *wrbuf = spi_gettxbuf(port);
 	uint8_t *rdbuf = spi_getrxbuf(port);
 	size_t bufsz = spi_getbufsz(port);
-	const uint64_t read_delay = 1000000 / port->speed;
 	int i;
 	
 	// reset
@@ -243,7 +243,7 @@ bool gpio_spi_txrx(struct spi_port * const port)
 		{
 			gpio_assign(port->mosi, wrbuf[0] & i);
 			gpio_assign(port->sclk, true);
-			cgsleep_us(read_delay);
+			busyloop_baud(port->speed);
 			if (gpio_get(port->miso))
 				rdbuf[0] |= i;
 			gpio_assign(port->sclk, false);
@@ -258,6 +258,7 @@ void spi_init_gpio(struct spi_port * const port)
 	INP_GPIO(port->sclk); OUT_GPIO(port->sclk);
 	INP_GPIO(port->mosi); OUT_GPIO(port->mosi);
 	INP_GPIO(port->miso);
+	busyloop_calibrate();
 }
 
 #endif
