@@ -37,6 +37,7 @@ extern struct spi_port *sys_spi;
 
 
 extern void spi_init_gpio(struct spi_port *);
+extern void spi_gpio_multi_txrx(struct spi_port **, int);
 
 /* SPI BUFFER OPS */
 static inline

@@ -249,7 +249,92 @@ bool gpio_spi_txrx(struct spi_port * const port)
 			gpio_assign(port->sclk, false);
 		}
 	}
+	gpio_assign(port->mosi, false);
 	return true;
+}
+
+void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
+{
+	struct spi_port *port;
+	int spi_num, i;
+	size_t bufsz;
+	unsigned pos = 0;
+	unsigned all_sclk = 0, all_mosi = 0;
+	unsigned active_sclk, do_set[8], do_clr[8], in_lev[8];
+	const uint8_t *wrbuf;
+	uint8_t *rdbuf;
+	
+	for (spi_num = 0; spi_num < spis_count; ++spi_num)
+	{
+		port = spis[spi_num];
+		all_sclk |= port->sclk;
+		all_mosi |= port->mosi;
+	}
+	
+	// reset all at once
+	GPIO_SET = all_sclk;
+	for (i = 0; i < 78*3; ++i)
+	{
+		GPIO_SET = all_mosi;
+		GPIO_CLR = all_mosi;
+	}
+	GPIO_CLR = all_sclk;
+	
+	while (true)
+	{
+		active_sclk = 0;
+		memset(do_set, 0, sizeof(do_set));
+		memset(do_clr, 0, sizeof(do_set));
+		for (spi_num = 0; spi_num < spis_count; ++spi_num)
+		{
+			port = spis[spi_num];
+			bufsz = spi_getbufsz(port);
+			if (pos >= bufsz)
+			{
+				if (pos == bufsz)
+					// In case the sclk is shared, ensure mosi is low
+					do_clr[0] |= port->mosi;
+				continue;
+			}
+			
+			active_sclk |= port->sclk;
+			for (i = 7; i >= 0; --i)
+			{
+				wrbuf = spi_gettxbuf(port);
+				if (wrbuf[pos] & (1 << i))
+					do_set[i] |= port->mosi;
+				else
+					do_clr[i] |= port->mosi;
+			}
+		}
+		
+		if (!active_sclk)
+			break;
+		
+		for (i = 7; i >= 0; --i)
+		{
+			GPIO_SET = active_sclk | do_set[i];
+			if (do_clr[i])
+				GPIO_CLR = do_clr[i];
+			// TODO: delay?
+			in_lev[i] = GPIO_LEV;
+			GPIO_CLR = active_sclk;
+		}
+		
+		for (spi_num = 0; spi_num < spis_count; ++spi_num)
+		{
+			port = spis[spi_num];
+			bufsz = spi_getbufsz(port);
+			if (pos >= bufsz)
+				continue;
+			
+			rdbuf = spi_getrxbuf(port);
+			rdbuf[pos] = 0;
+			for (i = 7; i >= 0; --i)
+				if (in_lev[i] & port->miso)
+					rdbuf[pos] |= (1 << i);
+		}
+	}
 }
 
 void spi_init_gpio(struct spi_port * const port)

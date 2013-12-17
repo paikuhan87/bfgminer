@@ -415,6 +415,8 @@ void bitfury_do_io(struct thr_info * const master_thr)
 	struct cgpu_info *procs[n_chips];
 	void *rxbuf[n_chips];
 	bitfury_inp_t rxbuf_copy[n_chips];
+	struct spi_port *spis[n_chips];
+	int spis_count = 0;
 	
 	// NOTE: This code assumes:
 	// 1) that chips on the same SPI bus are grouped together
@@ -431,9 +433,8 @@ void bitfury_do_io(struct thr_info * const master_thr)
 		{
 			if (spi != bitfury->spi)
 			{
-				if (spi)
-					spi_txrx(spi);
 				spi = bitfury->spi;
+				spis[spis_count++] = spi;
 				spi_clear_buf(spi);
 				spi_emit_break(spi);
 				lastchip = 0;
@@ -454,7 +455,7 @@ void bitfury_do_io(struct thr_info * const master_thr)
 		return;
 	}
 	timer_set_now(&tv_now);
-	spi_txrx(spi);
+	spi_gpio_multi_txrx(spis, spis_count);
 	
 	for (j = 0; j < n_chips; ++j)
 	{
