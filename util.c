@@ -1403,6 +1403,42 @@ double tdiff(struct timeval *end, struct timeval *start)
 }
 
 
+static const uint64_t busyloop_calibrate_n = 0x10000000;
+static uint64_t busyloop_calibrate_us;
+
+void busyloop_recalibrate()
+{
+	struct timeval tv_start, tv_end;
+	volatile uint64_t i;
+	volatile uint64_t delay;
+	
+	timer_set_now(&tv_start);
+	delay = busyloop_calibrate_n / 0x10 * 0x10;
+	for (i = 0; i < delay; ++i)
+		;
+	timer_set_now(&tv_end);
+	
+	timersub(&tv_end, &tv_start, &tv_end);
+	busyloop_calibrate_us = timeval_to_us(&tv_end);
+}
+
+void busyloop_calibrate()
+{
+	if (!busyloop_calibrate_us)
+		busyloop_recalibrate();
+}
+
+void busyloop_us(const uint64_t us)
+{
+	volatile uint64_t i;
+	volatile uint64_t delay;
+	
+	delay = us * busyloop_calibrate_n / busyloop_calibrate_us;
+	for (i = 0; i < delay; ++i)
+		;
+}
+
+
 int32_t utf8_decode(const void *b, int *out_len)
 {
 	int32_t w;

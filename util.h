@@ -157,6 +157,11 @@ int cgtimer_to_ms(cgtimer_t *cgt)
 #define cgtimer_sub(a, b, res)  timersub(a, b, res)
 double us_tdiff(struct timeval *end, struct timeval *start);
 double tdiff(struct timeval *end, struct timeval *start);
+
+extern void busyloop_recalibrate();
+extern void busyloop_calibrate();
+extern void busyloop_us(const uint64_t);
+
 bool _stratum_send(struct pool *pool, char *s, ssize_t len, bool force);
 #define stratum_send(pool, s, len)  _stratum_send(pool, s, len, false)
 bool sock_full(struct pool *pool);
