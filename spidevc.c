@@ -335,6 +335,8 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 				if (in_lev[i] & (1 << port->miso))
 					rdbuf[pos] |= (1 << i);
 		}
+		
+		++pos;
 	}
 }
 
