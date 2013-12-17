@@ -737,6 +737,8 @@ char *bitfury_spi_port_config(struct cgpu_info * const proc, char *option, char 
 		
 		return NULL;
 	}
+	
+	return "";
 }
 
 char *bitfury_set_device(struct cgpu_info * const proc, char * const option, char * const setting, char * const replybuf)
@@ -751,7 +753,8 @@ char *bitfury_set_device(struct cgpu_info * const proc, char * const option, cha
 		return replybuf;
 	}
 	
-	if ( (rv = bitfury_spi_port_config(proc, option, setting, replybuf)) )
+	rv = bitfury_spi_port_config(proc, option, setting, replybuf);
+	if (!(rv && !rv[0]))
 		return rv;
 	
 	if (!strcasecmp(option, "osc6_bits"))
