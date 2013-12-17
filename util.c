@@ -1428,14 +1428,24 @@ void busyloop_calibrate()
 		busyloop_recalibrate();
 }
 
-void busyloop_us(const uint64_t us)
+static inline
+void _busyloop_delay(volatile uint64_t n)
 {
 	volatile uint64_t i;
 	volatile uint64_t delay;
-	
-	delay = us * busyloop_calibrate_n / busyloop_calibrate_us;
+	delay = n / busyloop_calibrate_us;
 	for (i = 0; i < delay; ++i)
 		;
+}
+
+void busyloop_us(const uint64_t us)
+{
+	_busyloop_delay(us * busyloop_calibrate_n);
+}
+
+void busyloop_baud(const uint64_t baud)
+{
+	_busyloop_delay(1000000 * busyloop_calibrate_n / baud);
 }
 
 

@@ -161,6 +161,7 @@ double tdiff(struct timeval *end, struct timeval *start);
 extern void busyloop_recalibrate();
 extern void busyloop_calibrate();
 extern void busyloop_us(const uint64_t);
+extern void busyloop_baud(const uint64_t);
 
 bool _stratum_send(struct pool *pool, char *s, ssize_t len, bool force);
 #define stratum_send(pool, s, len)  _stratum_send(pool, s, len, false)
