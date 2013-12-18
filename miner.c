@@ -1139,14 +1139,16 @@ void _vcom_devinfo_scan_querydosdevice(struct lowlevel_device_info ** const devi
 	char dev[PATH_MAX];
 	char *devp = dev;
 	size_t bufLen = 0x100;
+	char *buf = malloc(bufLen);
 tryagain: ;
-	char buf[bufLen];
 	if (!QueryDosDevice(NULL, buf, bufLen)) {
 		if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
 			bufLen *= 2;
 			applog(LOG_DEBUG, "QueryDosDevice returned insufficent buffer error; enlarging to %lx", (unsigned long)bufLen);
+			buf = realloc(buf, bufLen);
 			goto tryagain;
 		}
+		free(buf);
 		applogr(, LOG_WARNING, "Error occurred trying to enumerate COM ports with QueryDosDevice");
 	}
 	size_t tLen;
@@ -1159,6 +1161,7 @@ tryagain: ;
 		memcpy(devp, t, tLen);
 		_vcom_devinfo_findorcreate(devinfo_list, dev);
 	}
+	free(buf);
 }
 #else
 void _vcom_devinfo_scan_lsdev(struct lowlevel_device_info ** const devinfo_list)
