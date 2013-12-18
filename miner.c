@@ -509,18 +509,34 @@ char *devpath_to_devid(const char *devpath)
 	memcpy(devs, "dev_t:", 6);
 	bin2hex(&devs[6], &my_stat.st_rdev, sizeof(dev_t));
 #else
+	applog(LOG_ERR, ">>>A:%s",devpath);
 	if (!strncmp(devpath, "\\\\.\\", 4))
 		devpath += 4;
+	applog(LOG_ERR, ">>>B");
 	if (strncasecmp(devpath, "COM", 3) || !devpath[3])
+	{
+		applog(LOG_ERR, ">>>B2");
 		return NULL;
+	}
+	applog(LOG_ERR, ">>>C");
 	devpath += 3;
+	applog(LOG_ERR, ">>>D");
 	char *p;
 	strtol(devpath, &p, 10);
+	applog(LOG_ERR, ">>>E");
 	if (p[0])
+	{
+		applog(LOG_ERR, ">>>E2");
 		return NULL;
+	}
+	applog(LOG_ERR, ">>>F");
 	const int sz = (p - devpath);
+	applog(LOG_ERR, ">>>G");
 	char *devs = malloc(4 + sz + 1);
+	applog(LOG_ERR, ">>>H");
 	sprintf(devs, "com:%s", devpath);
+	applog(LOG_ERR, ">>>I");
+	applog(LOG_ERR, ">>>I2:%s",devs);
 #endif
 	return devs;
 }
