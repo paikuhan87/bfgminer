@@ -311,10 +311,9 @@ void spi_gpio_multi_txrx(struct spi_port **spis, const int spis_count)
 		if (!active_sclk)
 			break;
 		
-		do_set[7] |= active_sclk;
 		for (i = 7; i >= 0; --i)
 		{
-			GPIO_SET = do_set[i];
+			GPIO_SET = active_sclk | do_set[i];
 			if (do_clr[i])
 				GPIO_CLR = do_clr[i];
 			// TODO: delay?
