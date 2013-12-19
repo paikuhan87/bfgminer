@@ -41,16 +41,20 @@ bool bigpic_lowl_match(const struct lowlevel_device_info * const info)
 //------------------------------------------------------------------------------
 static bool bigpic_detect_custom(const char *devpath, struct device_drv *api, struct bigpic_info *info)
 {
+	applog(LOG_ERR, ">>>A %s",devpath);
 	int fd = serial_open(devpath, info->baud, 1, true);
+	applog(LOG_ERR, ">>>B %d",fd);
 
 	if(fd < 0)
 	{
 		return false;
 	}
 
+	applog(LOG_ERR, ">>>C");
 	char buf[sizeof(struct bigpic_identity)+1];
 	int len;
 
+	applog(LOG_ERR, ">>>D");
 	if (1 != write(fd, "I", 1))
 	{
 		applog(LOG_ERR, "%s: Failed writing id request to %s",
@@ -58,13 +62,16 @@ static bool bigpic_detect_custom(const char *devpath, struct device_drv *api, st
 		serial_close(fd);
 		return false;
 	}
+	applog(LOG_ERR, ">>>E");
 	len = serial_read(fd, buf, sizeof(buf));
 	if(len != 14)
 	{
+	applog(LOG_ERR, ">>>F");
 		serial_close(fd);
 		return false;
 	}
 
+	applog(LOG_ERR, ">>>G");
 	info->id.version = buf[1];
 	memcpy(info->id.product, buf+2, 8);
 	memcpy(&info->id.serial, buf+10, 4);
