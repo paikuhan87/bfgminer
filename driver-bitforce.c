@@ -25,6 +25,9 @@
 #include "deviceapi.h"
 #include "miner.h"
 #include "lowlevel.h"
+#ifdef WIN32
+#include "lowl-mswin.h"
+#endif
 #include "lowl-pci.h"
 #include "lowl-vcom.h"
 #include "util.h"
@@ -50,6 +53,7 @@
 #define BITFORCE_MAX_QRESULT_WAIT 1000
 #define BITFORCE_MAX_BQUEUE_AT_ONCE_65NM 5
 #define BITFORCE_MAX_BQUEUE_AT_ONCE_28NM 20
+#define BITFORCE_MONARCH_READ_SIZE 0x1000
 
 enum bitforce_proto {
 	BFP_WORK   = 0,
@@ -170,6 +174,51 @@ static struct bitforce_lowl_interface bfllif_vcom = {
 	.write = bitforce_vcom_write,
 };
 
+#if defined(NEED_BFG_LOWL_MSWIN) || defined(NEED_BFG_LOWL_PCI)
+static
+void bitforce_gets_from_buf(char * const buf, size_t bufLen, bytes_t * const b)
+{
+	ssize_t linelen = (bytes_find(b, '\n') + 1) ?: bytes_len(b);
+	if (linelen > --bufLen)
+		linelen = bufLen;
+	
+	memcpy(buf, bytes_buf(b), linelen);
+	bytes_shift(b, linelen);
+	buf[linelen] = '\0';
+}
+#endif
+
+#ifdef NEED_BFG_LOWL_MSWIN
+static
+void bitforce_mswin_gets(char *buf, size_t bufLen, struct cgpu_info * const dev)
+{
+	struct bitforce_data * const devdata = dev->device_data;
+	bytes_t *b = &devdata->getsbuf;
+	
+	if (!bytes_len(&devdata->getsbuf))
+	{
+		const int fd = dev->device_fd;
+		void * const tbuf = bytes_preappend(b, BITFORCE_MONARCH_READ_SIZE);
+		ssize_t readsz = read(fd, tbuf, BITFORCE_MONARCH_READ_SIZE);
+		if (readsz <= 0)
+		{
+			buf[0] = '\0';
+			applogr(, LOG_ERR, "%s: Failed to get response", dev->dev_repr);
+		}
+		bytes_postappend(b, readsz);
+	}
+	
+	bitforce_gets_from_buf(buf, bufLen, b);
+}
+
+static struct bitforce_lowl_interface bfllif_mswin = {
+	.open = bitforce_vcom_open,
+	.close = bitforce_vcom_close,
+	.gets = bitforce_mswin_gets,
+	.write = bitforce_vcom_write,
+};
+#endif
+
 #ifdef NEED_BFG_LOWL_PCI
 static
 bool bitforce_pci_open(struct cgpu_info * const dev)
@@ -221,13 +270,7 @@ void bitforce_pci_gets(char * const buf, size_t bufLen, struct cgpu_info * const
 			bytes_postappend(b, resp);
 	}
 	
-	ssize_t linelen = (bytes_find(b, '\n') + 1) ?: bytes_len(b);
-	if (linelen > --bufLen)
-		linelen = bufLen;
-	
-	memcpy(buf, bytes_buf(b), linelen);
-	bytes_shift(b, linelen);
-	buf[linelen] = '\0';
+	bitforce_gets_from_buf(buf, bufLen, b);
 }
 
 static
@@ -403,6 +446,10 @@ bool bitforce_lowl_match(const struct lowlevel_device_info * const info)
 #ifdef NEED_BFG_LOWL_PCI
 	if (info->lowl == &lowl_pci)
 		return info->vid == BFL_PCI_VENDOR_ID;
+#endif
+#ifdef NEED_BFG_LOWL_MSWIN
+	if (lowl_mswin_match_guid(info, &WIN_GUID_DEVINTERFACE_MonarchKMDF))
+		return true;
 #endif
 	return lowlevel_match_product(info, "BitFORCE", "SHA256");
 }
@@ -588,6 +635,10 @@ bool bitforce_lowl_probe(const struct lowlevel_device_info * const info)
 #ifdef NEED_BFG_LOWL_PCI
 	if (info->lowl == &lowl_pci)
 		return bitforce_detect_oneof(info->path, &bfllif_pci);
+#endif
+#ifdef NEED_BFG_LOWL_MSWIN
+	if (lowl_mswin_match_guid(info, &WIN_GUID_DEVINTERFACE_MonarchKMDF))
+		return bitforce_detect_oneof(info->path, &bfllif_mswin);
 #endif
 	return vcom_lowl_probe_wrapper(info, bitforce_detect_one);
 }

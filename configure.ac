@@ -126,6 +126,7 @@ need_dynclock=no
 need_lowl_vcom=no
 need_lowlevel=no
 need_lowl_hid=no
+need_lowl_mswin=no
 need_lowl_pci=no
 need_lowl_usb=no
 have_cygwin=false
@@ -409,6 +410,10 @@ if test "x$bitforce" = xyes; then
 		need_lowl_pci=yes
 	fi
 	need_lowl_vcom=yes
+	driverlist="$driverlist bitforce:mswin/need_lowl_mswin"
+	if test x$have_win32 = xtrue; then
+		need_lowl_mswin=yes
+	fi
 	has_fpga=yes
 	has_asic=yes
 	have_udevrules=true
@@ -1018,6 +1023,12 @@ if test x$need_lowl_hid = xyes; then
 	need_lowlevel=yes
 fi
 
+lowllist="$lowllist mswin/need_lowl_mswin"
+if test x$need_lowl_mswin = xyes; then
+	AC_DEFINE([NEED_BFG_LOWL_MSWIN], [1], [Defined to 1 if lowlevel mswin drivers are being used])
+	need_lowlevel=yes
+fi
+
 lowllist="$lowllist pci/need_lowl_pci"
 if test x$need_lowl_pci = xyes; then
 	AC_DEFINE([NEED_BFG_LOWL_PCI], [1], [Defined to 1 if lowlevel PCI drivers are being used])
@@ -1222,6 +1233,7 @@ AM_CONDITIONAL([NEED_BFG_BINLOADER], [test x$need_binloader = xyes])
 AM_CONDITIONAL([NEED_DYNCLOCK], [test x$need_dynclock = xyes])
 AM_CONDITIONAL([NEED_BFG_LOWL_VCOM], [test x$need_lowl_vcom = xyes])
 AM_CONDITIONAL([NEED_BFG_LOWL_HID], [test x$need_lowl_hid = xyes])
+AM_CONDITIONAL([NEED_BFG_LOWL_MSWIN], [test x$need_lowl_mswin = xyes])
 AM_CONDITIONAL([NEED_BFG_LOWL_PCI], [test x$need_lowl_pci = xyes])
 AM_CONDITIONAL([NEED_BFG_LOWLEVEL], [test x$need_lowlevel = xyes])
 AM_CONDITIONAL([HAS_SCRYPT], [test x$scrypt = xyes])
