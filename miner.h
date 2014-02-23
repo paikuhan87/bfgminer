@@ -209,83 +209,6 @@ static inline int fsync (int fd)
 #	endif
 #endif
 
-<<<<<<< HEAD
-||||||| parent of 7c5b0b8... Add Avalon2 (2U size machine) support
-/* Put avalon last to make it the last device it tries to detect to prevent it
- * trying to claim same chip but different devices. Adding a device here will
- * update all macros in the code that use the *_PARSE_COMMANDS macros for each
- * listed driver. */
-#define FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	DRIVER_ADD_COMMAND(bitforce) \
-	DRIVER_ADD_COMMAND(icarus) \
-	DRIVER_ADD_COMMAND(modminer)
-
-#define ASIC_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	DRIVER_ADD_COMMAND(bflsc) \
-	DRIVER_ADD_COMMAND(bitfury) \
-	DRIVER_ADD_COMMAND(hashfast) \
-	DRIVER_ADD_COMMAND(klondike) \
-	DRIVER_ADD_COMMAND(knc) \
-	DRIVER_ADD_COMMAND(drillbit) \
-	DRIVER_ADD_COMMAND(bab) \
-	DRIVER_ADD_COMMAND(minion) \
-	DRIVER_ADD_COMMAND(avalon)
-
-#define DRIVER_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	ASIC_PARSE_COMMANDS(DRIVER_ADD_COMMAND)
-
-#define DRIVER_ENUM(X) DRIVER_##X,
-#define DRIVER_PROTOTYPE(X) struct device_drv X##_drv;
-
-/* Create drv_driver enum from DRIVER_PARSE_COMMANDS macro */
-enum drv_driver {
-	DRIVER_PARSE_COMMANDS(DRIVER_ENUM)
-	DRIVER_MAX
-};
-
-/* Use DRIVER_PARSE_COMMANDS to generate extern device_drv prototypes */
-DRIVER_PARSE_COMMANDS(DRIVER_PROTOTYPE)
-
-=======
-/* Put avalon last to make it the last device it tries to detect to prevent it
- * trying to claim same chip but different devices. Adding a device here will
- * update all macros in the code that use the *_PARSE_COMMANDS macros for each
- * listed driver. */
-#define FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	DRIVER_ADD_COMMAND(bitforce) \
-	DRIVER_ADD_COMMAND(icarus) \
-	DRIVER_ADD_COMMAND(modminer)
-
-#define ASIC_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	DRIVER_ADD_COMMAND(bflsc) \
-	DRIVER_ADD_COMMAND(bitfury) \
-	DRIVER_ADD_COMMAND(hashfast) \
-	DRIVER_ADD_COMMAND(klondike) \
-	DRIVER_ADD_COMMAND(knc) \
-	DRIVER_ADD_COMMAND(drillbit) \
-	DRIVER_ADD_COMMAND(bab) \
-	DRIVER_ADD_COMMAND(minion) \
-	DRIVER_ADD_COMMAND(avalon2) \
-	DRIVER_ADD_COMMAND(avalon)
-
-#define DRIVER_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
-	ASIC_PARSE_COMMANDS(DRIVER_ADD_COMMAND)
-
-#define DRIVER_ENUM(X) DRIVER_##X,
-#define DRIVER_PROTOTYPE(X) struct device_drv X##_drv;
-
-/* Create drv_driver enum from DRIVER_PARSE_COMMANDS macro */
-enum drv_driver {
-	DRIVER_PARSE_COMMANDS(DRIVER_ENUM)
-	DRIVER_MAX
-};
-
-/* Use DRIVER_PARSE_COMMANDS to generate extern device_drv prototypes */
-DRIVER_PARSE_COMMANDS(DRIVER_PROTOTYPE)
-
->>>>>>> 7c5b0b8... Add Avalon2 (2U size machine) support
 enum alive {
 	LIFE_WELL,
 	LIFE_SICK,
@@ -542,18 +465,12 @@ struct cgpu_info {
 #ifdef USE_ZTEX
 		struct libztex_device *device_ztex;
 #endif
-<<<<<<< HEAD
 		int device_fd;
 #ifdef USE_X6500
 		struct ft232r_device_handle *device_ft232r;
 #endif
 	};
-#ifdef USE_AVALON
-||||||| parent of 7c5b0b8... Add Avalon2 (2U size machine) support
-#ifdef USE_AVALON
-=======
 #if defined(USE_AVALON) || defined(USE_AVALON2)
->>>>>>> 7c5b0b8... Add Avalon2 (2U size machine) support
 	struct work **works;
 	int work_array;
 	int queued;
@@ -1514,6 +1431,7 @@ extern void clean_work(struct work *work);
 extern void free_work(struct work *work);
 extern void __copy_work(struct work *work, const struct work *base_work);
 extern struct work *copy_work(const struct work *base_work);
+extern const char *bfg_workpadding_bin;
 extern char *devpath_to_devid(const char *);
 extern struct thr_info *get_thread(int thr_id);
 extern struct cgpu_info *get_devices(int id);
