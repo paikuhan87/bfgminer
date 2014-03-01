@@ -815,7 +815,7 @@ static void avalon2_shutdown(struct thr_info *thr)
 
 struct device_drv avalon2_drv = {
 	.dname = "avalon2",
-	.name = "AV2",
+	.name = "AVD",
 	.get_api_stats = avalon2_api_stats,
 	.drv_detect = avalon2_detect,
 	.reinit_device = avalon2_init,
