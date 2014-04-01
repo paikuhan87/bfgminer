@@ -160,7 +160,6 @@ static int decode_pkg(struct thr_info *thr, struct avalon2_ret *ar, uint8_t *pkg
 {
 	struct cgpu_info *avalon2;
 	struct avalon2_info *info;
-	struct pool *pool;
 
 	unsigned int expected_crc;
 	unsigned int actual_crc;
@@ -221,14 +220,11 @@ static int decode_pkg(struct thr_info *thr, struct avalon2_ret *ar, uint8_t *pkg
 
 			applog(LOG_DEBUG, "Avalon2: Found! [%s] %d:(%08x) (%08x)",
 			       job_id, pool_no, nonce2, nonce);
-			/* FIXME:
-			 * We need remember the pre_pool. then submit the stale work */
-			pool = pools[pool_no];
-			if (job_idcmp(job_id, pool->swork.job_id))
+			if (job_idcmp(job_id, info->swork.job_id))
 				break;
 
 			if (thr && !info->new_stratum)
-				work2d_submit_nonce(thr, &pool->swork, &info->tv_prepared, xnonce2, info->xnonce1, nonce, pool->swork.ntime, NULL, 1.);
+				work2d_submit_nonce(thr, &info->swork, &info->tv_prepared, xnonce2, info->xnonce1, nonce, info->swork.ntime, NULL, 1.);
 			break;
 		case AVA2_P_STATUS:
 			memcpy(&tmp, ar->data, 4);
@@ -488,6 +484,7 @@ static int avalon2_stratum_pkgs(int fd, struct pool *pool, struct thr_info *thr)
 	}
 	
 	timer_set_now(&info->tv_prepared);
+	stratum_work_cpy(&info->swork, &pool->swork);
 	
 	return 0;
 }
