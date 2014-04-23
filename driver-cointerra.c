@@ -401,6 +401,7 @@ static void cta_parse_recvmatch(struct thr_info *thr, struct cgpu_info *cointerr
 	asic = u8_from_msg(buf, CTA_MCU_ASIC);
 	core = u8_from_msg(buf, CTA_MCU_CORE);
 	pipe = u8_from_msg(buf, CTA_MCU_PIPE);
+	applog(LOG_DEBUG, ">>> %d %d %d", asic, core, pipe);
 	pipeno = asic * 512 + core * 128 + pipe;
 	
 	corecgpu = cointerra;
@@ -462,8 +463,8 @@ static void cta_parse_recvmatch(struct thr_info *thr, struct cgpu_info *cointerr
 				info->pipe_bitmap[bitchar] |= 0x80 >> bitbit;
 			}
 
-			applog(LOG_DEBUG, "%s %d: Submitting tested work job_id %s work_id %u",
-			       cointerra->drv->name, cointerra->device_id, work->job_id, work->subid);
+			applog(LOG_DEBUG, "%"PRIpreprv": Submitting tested work job_id %s work_id %u",
+			       corecgpu->proc_repr, work->job_id, work->subid);
 			ret = submit_nonce(corethr, work, nonce);
 
 			mutex_lock(&info->lock);
@@ -1067,7 +1068,7 @@ static int64_t cta_scanwork(struct thr_info *thr)
 	struct timeval now;
 	int64_t hashes;
 
-	applog(LOG_DEBUG, "%s %d: cta_scanwork %d", cointerra->drv->name, cointerra->device_id,__LINE__);
+// 	applog(LOG_DEBUG, "%s %d: cta_scanwork %d", cointerra->drv->name, cointerra->device_id,__LINE__);
 	hashes = 0;
 
 	if (unlikely(0))
