@@ -294,6 +294,8 @@ if USE_BFX
 bfgminer_SOURCES += driver-bfx.c
 endif
 
+bfgminer_SOURCES += driver-SPI-bitmine-A1.c
+
 if HAS_METABANK
 bfgminer_SOURCES += driver-metabank.c tm_i2c.h tm_i2c.c
 endif
