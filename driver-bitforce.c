@@ -81,6 +81,7 @@ enum bitforce_style {
 struct bitforce_lowl_interface {
 	bool (*open)(struct cgpu_info *);
 	void (*close)(struct cgpu_info *);
+	ssize_t (*read)(void *, size_t, struct cgpu_info *);
 	void (*gets)(char *, size_t, struct cgpu_info *);
 	ssize_t (*write)(struct cgpu_info *, const void *, ssize_t);
 	bool (*set_timeout)(struct cgpu_info* , uint8_t);
@@ -146,6 +147,28 @@ void bitforce_vcom_close(struct cgpu_info * const dev)
 }
 
 static
+ssize_t bitforce_vcom_read(void * const buf_p, size_t bufLen, struct cgpu_info * const dev)
+{
+	uint8_t *buf = buf_p;
+	const int fd = dev->device_fd;
+	ssize_t rv, ret = 0;
+	while (bufLen > 0)
+	{
+		rv = read(fd, buf, bufLen);
+		if (rv <= 0)
+		{
+			if (ret > 0)
+				return ret;
+			return rv;
+		}
+		buf += rv;
+		bufLen -= rv;
+		ret += rv;
+	}
+	return ret;
+}
+
+static
 void bitforce_vcom_gets(char *buf, size_t bufLen, struct cgpu_info * const dev)
 {
 	const int fd = dev->device_fd;
@@ -177,6 +200,7 @@ bool bitforce_vcom_set_timeout(struct cgpu_info * const dev, const uint8_t timeo
 static struct bitforce_lowl_interface bfllif_vcom = {
 	.open = bitforce_vcom_open,
 	.close = bitforce_vcom_close,
+	.read = bitforce_vcom_read,
 	.gets = bitforce_vcom_gets,
 	.write = bitforce_vcom_write,
 	.set_timeout = bitforce_vcom_set_timeout,
@@ -212,7 +236,7 @@ void bitforce_pci_close(struct cgpu_info * const dev)
 }
 
 static
-void bitforce_pci_gets(char * const buf, size_t bufLen, struct cgpu_info * const dev)
+void _bitforce_pci_read(struct cgpu_info * const dev)
 {
 	struct bitforce_data * const devdata = dev->device_data;
 	const uint32_t looking_for = (uint32_t)devdata->lasttag << 0x10;
@@ -232,7 +256,35 @@ void bitforce_pci_gets(char * const buf, size_t bufLen, struct cgpu_info * const
 		if (lowl_pci_read_data(devdata->lph, buf, resp, 1, 0))
 			bytes_postappend(b, resp);
 	}
+}
+
+static
+ssize_t bitforce_pci_read(void * const buf, const size_t bufLen, struct cgpu_info * const dev)
+{
+	struct bitforce_data * const devdata = dev->device_data;
+	bytes_t *b = &devdata->getsbuf;
 	
+	_bitforce_pci_read(dev);
+	ssize_t datalen = bytes_len(b);
+	if (datalen <= 0)
+		return datalen;
+	
+	if (datalen > bufLen)
+		datalen = bufLen;
+	
+	memcpy(buf, bytes_buf(b), datalen);
+	bytes_shift(b, datalen);
+	
+	return datalen;
+}
+
+static
+void bitforce_pci_gets(char * const buf, size_t bufLen, struct cgpu_info * const dev)
+{
+	struct bitforce_data * const devdata = dev->device_data;
+	bytes_t *b = &devdata->getsbuf;
+	
+	_bitforce_pci_read(dev);
 	ssize_t linelen = (bytes_find(b, '\n') + 1) ?: bytes_len(b);
 	if (linelen > --bufLen)
 		linelen = bufLen;
@@ -264,6 +316,7 @@ ssize_t bitforce_pci_write(struct cgpu_info * const dev, const void * const bufp
 static struct bitforce_lowl_interface bfllif_pci = {
 	.open = bitforce_pci_open,
 	.close = bitforce_pci_close,
+	.read = bitforce_pci_read,
 	.gets = bitforce_pci_gets,
 	.write = bitforce_pci_write,
 };
@@ -287,6 +340,30 @@ bool bitforce_open(struct cgpu_info * const proc)
 	
 	bitforce_close(proc);
 	return devdata->lowlif->open(dev);
+}
+
+static
+ssize_t bitforce_read(struct cgpu_info * const proc, void * const buf, const size_t bufLen)
+{
+	struct cgpu_info * const dev = proc->device;
+	struct bitforce_data * const devdata = dev->device_data;
+	ssize_t rv;
+	
+	if (likely(devdata->is_open))
+		rv = devdata->lowlif->read(buf, bufLen, dev);
+	else
+		rv = -1;
+	
+	if (unlikely(opt_dev_protocol))
+	{
+		size_t datalen = (rv > 0) ? rv : 0;
+		char hex[(rv * 2) + 1];
+		bin2hex(hex, buf, datalen);
+		applog(LOG_DEBUG, "DEVPROTO: %s: READ(%lu): %s",
+		       dev->dev_repr, (unsigned long)bufLen, hex);
+	}
+	
+	return rv;
 }
 
 static
@@ -1185,6 +1262,56 @@ int bitforce_zox(struct thr_info *thr, const char *cmd)
 	return count;
 }
 
+static
+int bitforce_zoxbin(struct thr_info * const thr)
+{
+	struct cgpu_info * const bitforce = thr->cgpu;
+	struct bitforce_data * const data = bitforce->device_data;
+	pthread_mutex_t * const mutexp = &bitforce->device->device_mutex;
+	char * const pdevbuf = &data->noncebuf[0];
+	
+	static const char * const cmd = "ZoX";
+	static const size_t cmdsz = 3;
+	uint16_t resultlen;
+	
+	mutex_lock(mutexp);
+	
+	if (unlikely(opt_dev_protocol))
+		applog(LOG_DEBUG, "DEVPROTO: %"PRIpreprv": CMD1: %s",
+		       bitforce->proc_repr, cmd);
+	
+	bitforce_send(bitforce, cmd, cmdsz);
+	
+	const char *step;
+	if (2 != bitforce_read(bitforce, &resultlen, 2))
+	{
+		step = "length";
+err_bqr:
+		mutex_unlock(mutexp);
+		inc_hw_errors_only(thr);
+		applogr(-1, LOG_ERR, "%"PRIpreprv": Error getting binary queue result %s",
+		        bitforce->proc_repr, step);
+	}
+	resultlen = be16toh(resultlen);
+	
+	if (unlikely(resultlen > sizeof(data->noncebuf) + 2 || resultlen < 2))
+	{
+		step = "(bad data length)";
+		goto err_bqr;
+	}
+	
+	resultlen -= 2;
+	if (bitforce_read(bitforce, pdevbuf, resultlen) != resultlen)
+	{
+		step = "data";
+		goto err_bqr;
+	}
+	
+	mutex_unlock(mutexp);
+	
+	return pdevbuf[1];
+}
+
 static inline char *next_line(char *);
 
 static
@@ -1978,6 +2105,21 @@ void work_list_del(struct work **head, struct work *work)
 }
 
 static
+struct work *bitforce_find_work(struct thr_info * const thr, const void * const midstate, const void * const datatail)
+{
+	struct work *work;
+	DL_FOREACH(thr->work_list, work)
+	{
+		if (unlikely(memcmp(work->midstate, midstate, 32)))
+			continue;
+		if (unlikely(memcmp(&work->data[64], datatail, 12)))
+			continue;
+		return work;
+	}
+	return NULL;
+}
+
+static
 bool bitforce_queue_do_results(struct thr_info *thr)
 {
 	struct cgpu_info *bitforce = thr->cgpu;
@@ -1986,6 +2128,7 @@ bool bitforce_queue_do_results(struct thr_info *thr)
 	struct bitforce_data *data = bitforce->device_data;
 	int count;
 	int fcount;
+	int nonce_count;
 	char *noncebuf, *buf, *end;
 	unsigned char midstate[32], datatail[12];
 	struct work *work, *tmpwork, *thiswork;
@@ -2000,12 +2143,19 @@ bool bitforce_queue_do_results(struct thr_info *thr)
 	
 again:
 	noncebuf = &data->noncebuf[0];
-	count = bitforce_zox(thr, "ZOX");
+	if (devdata->style == BFS_28NM)
+		count = bitforce_zoxbin(thr);
+	else
+		count = bitforce_zox(thr, "ZOX");
 	
 	if (unlikely(count < 0))
 	{
-		applog(LOG_ERR, "%"PRIpreprv": Received unexpected queue result response: %s", bitforce->proc_repr, noncebuf);
-		inc_hw_errors_only(thr);
+		if (devdata->style != BFS_28NM)
+		{
+			// 28nm takes care of this in zoxbin
+			applog(LOG_ERR, "%"PRIpreprv": Received unexpected queue result response: %s", bitforce->proc_repr, noncebuf);
+			inc_hw_errors_only(thr);
+		}
 		return false;
 	}
 	
@@ -2016,37 +2166,51 @@ again:
 	fcount = 0;
 	for (int i = 0; i < data->parallel; ++i)
 		counts[i] = 0;
-	noncebuf = next_line(noncebuf);
-	while ((buf = noncebuf)[0])
+	if (devdata->style == BFS_28NM)
 	{
-		if ( (noncebuf = next_line(buf)) )
-			noncebuf[-1] = '\0';
-		
-		if (strlen(buf) <= 90)
+		noncebuf += 2;
+		buf = malloc((2 * (0x2e + (255 * 5))) + 1);
+	}
+	else
+		noncebuf = next_line(noncebuf);
+	for (int resno = 0; resno < count; ++resno)
+	{
+		if (devdata->style == BFS_28NM)
 		{
-			applog(LOG_ERR, "%"PRIpreprv": Gibberish within queue results: %s", bitforce->proc_repr, buf);
-			continue;
+			memcpy(midstate, noncebuf, 0x20);
+			memcpy(datatail, &noncebuf[0x20], 0xc);
+			
+			bin2hex(buf, noncebuf, 0x2e + (noncebuf[0x2d] * 5));
+		}
+		else
+		{
+			buf = noncebuf;
+			noncebuf = next_line(buf);
+			if (noncebuf)
+				noncebuf[-1] = '\0';
+			
+			if (strlen(buf) <= 90)
+			{
+				applog(LOG_ERR, "%"PRIpreprv": Gibberish within queue results: %s", bitforce->proc_repr, buf);
+				continue;
+			}
+			
+			hex2bin(midstate, buf, 32);
+			hex2bin(datatail, &buf[65], 12);
 		}
 		
-		hex2bin(midstate, buf, 32);
-		hex2bin(datatail, &buf[65], 12);
+		thiswork = bitforce_find_work(thr, midstate, datatail);
 		
-		thiswork = NULL;
-		DL_FOREACH(thr->work_list, work)
-		{
-			if (unlikely(memcmp(work->midstate, midstate, 32)))
-				continue;
-			if (unlikely(memcmp(&work->data[64], datatail, 12)))
-				continue;
-			thiswork = work;
-			break;
-		}
-		
-		end = &buf[89];
 		chip_cgpu = bitforce;
+		if (devdata->style == BFS_28NM)
+			chipno = noncebuf[0x2c];
+		else
 		if (data->parallel_protocol)
+			chipno = strtol(&buf[90], &end, 16);
+		else
+			end = &buf[89];
+		
 		{
-			chipno = strtol(&end[1], &end, 16);
 			if (chipno >= data->parallel)
 			{
 				applog(LOG_ERR, "%"PRIpreprv": Chip number out of range for queue result: %s", chip_cgpu->proc_repr, buf);
@@ -2059,18 +2223,38 @@ again:
 		
 		applog(LOG_DEBUG, "%"PRIpreprv": Queue result: %s", chip_cgpu->proc_repr, buf);
 		
+		if (devdata->style == BFS_28NM)
+		{
+			nonce_count = noncebuf[0x2d];
+			noncebuf += 0x2e;
+		}
+		
 		if (unlikely(!thiswork))
 		{
 			applog(LOG_ERR, "%"PRIpreprv": Failed to find work for queue results: %s", chip_cgpu->proc_repr, buf);
 			inc_hw_errors_only(chip_thr);
+			if (devdata->style == BFS_28NM)
+				noncebuf += (5 * nonce_count);
 			goto next_qline;
 		}
 		
+		if (devdata->style == BFS_28NM)
+		{
+			for (int i = 0; i < nonce_count; ++i)
+			{
+				// const uint8_t engine = noncebuf[0];
+				const uint32_t nonce = upk_u32be(noncebuf, 1);
+				submit_nonce(chip_thr, thiswork, nonce);
+				noncebuf += 5;
+			}
+		}
+		else
 		if (unlikely(!end[0]))
 		{
 			applog(LOG_ERR, "%"PRIpreprv": Missing nonce count in queue results: %s", chip_cgpu->proc_repr, buf);
 			goto finishresult;
 		}
+		else
 		if (strtol(&end[1], &end, 10))
 		{
 			if (unlikely(!end[0]))
@@ -2078,7 +2262,7 @@ again:
 				applog(LOG_ERR, "%"PRIpreprv": Missing nonces in queue results: %s", chip_cgpu->proc_repr, buf);
 				goto finishresult;
 			}
-			bitforce_process_result_nonces(chip_thr, work, &end[1]);
+			bitforce_process_result_nonces(chip_thr, thiswork, &end[1]);
 		}
 		++fcount;
 		++counts[chipno];
@@ -2107,6 +2291,8 @@ finishresult:
 		}
 next_qline: (void)0;
 	}
+	if (devdata->style == BFS_28NM)
+		free(buf);
 	
 	bitforce_set_queue_full(thr);
 	
