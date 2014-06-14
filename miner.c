@@ -220,12 +220,10 @@ bool use_curses;
 bool have_libusb;
 #endif
 
-//ZeusMiner Definition
-bool opt_ltc_debug = false;
-bool opt_ltc_nocheck_golden = false;
-bool opt_nocheck_scrypt = false;
-int opt_chips_count = 1;
-int opt_chip_clk = 200;
+//ZeusMiner Default Definition
+bool opt_check_golden = false;
+int opt_chips_count = 6;
+int opt_chip_clk = 328;
 
 static bool opt_submit_stale = true;
 static float opt_shares;
@@ -2442,22 +2440,16 @@ static struct opt_table opt_config_table[] = {
 			"Display extra work time debug information"),
 	OPT_WITH_ARG("--pools",
 			opt_set_bool, NULL, NULL, opt_hidden),
-#ifdef USE_ZEUS
-	OPT_WITHOUT_ARG("--ltc-debug",
-			 opt_set_bool, &opt_ltc_debug,
-			 "Enable ltc debug output"),			 
-	OPT_WITHOUT_ARG("--nocheck-golden",
-			 opt_set_bool, &opt_ltc_nocheck_golden,
-			 "Disable ltc init golden check"),
-	OPT_WITHOUT_ARG("--nocheck-scrypt",
-			 opt_set_bool, &opt_nocheck_scrypt,
-			 "Disable scrypt result check, must enable in openwrt building"),
-	OPT_WITH_ARG("--chips-count",
+#ifdef USE_ZEUS		 
+	OPT_WITHOUT_ARG("--zeus-cg",
+			 opt_set_bool, &opt_check_golden,
+			 "ZEUS: Enables golden speed check (Currently deactivated!!!)"),
+	OPT_WITH_ARG("--zeus-cc",
 		 set_int_1_to_65535, opt_show_intval, &opt_chips_count,
-		 "Chips count in one com port"),
-	OPT_WITH_ARG("--ltc-clk",
+		 "ZEUS: Chips count on _one_ port (Default: 6)"),
+	OPT_WITH_ARG("--zeus-clk",
 		 set_int_1_to_65535, opt_show_intval, &opt_chip_clk,
-		 "clock Mhz"),		 
+		 "ZEUS: Chip clock in Mhz (Default: 328)"),		 
 #endif
 	OPT_ENDTABLE
 };
@@ -5717,18 +5709,9 @@ static double share_diff(const struct work *work)
 	return ret;
 }
 
-static void regen_hash(struct work *work)
+static
+void work_check_for_block(struct work * const work)
 {
-	hash_data(work->hash, work->data);
-}
-
-static void rebuild_hash(struct work *work)
-{
-	if (opt_scrypt)
-		scrypt_regenhash(work);
-	else
-		regen_hash(work);
-
 	work->share_diff = share_diff(work);
 	if (unlikely(work->share_diff >= current_diff)) {
 		work->block = true;
@@ -5802,7 +5785,7 @@ static struct submit_work_state *begin_submission(struct work *work)
 		.work = work,
 	};
 
-	rebuild_hash(work);
+	work_check_for_block(work);
 
 	if (stale_work(work, true)) {
 		work->stale = true;
@@ -9354,7 +9337,7 @@ void _submit_work_async(struct work *work)
 	if (opt_benchmark)
 	{
 		json_t * const jn = json_null();
-		rebuild_hash(work);
+		work_check_for_block(work);
 		share_result(jn, jn, jn, work, false, "");
 		free_work(work);
 		return;
@@ -9405,6 +9388,16 @@ void inc_hw_errors3(struct thr_info *thr, const struct work *work, const uint32_
 		thr->cgpu->drv->hw_error(thr);
 }
 
+void work_hash(struct work * const work)
+{
+#ifdef USE_SCRYPT
+	if (opt_scrypt)
+		scrypt_hash_data(work->hash, work->data);
+	else
+#endif
+		hash_data(work->hash, work->data);
+}
+
 static
 bool test_hash(const void * const phash, const float diff)
 {
@@ -9427,12 +9420,7 @@ enum test_nonce2_result _test_nonce2(struct work *work, uint32_t nonce, bool che
 	uint32_t *work_nonce = (uint32_t *)(work->data + 64 + 12);
 	*work_nonce = htole32(nonce);
 
-#ifdef USE_SCRYPT
-	if (opt_scrypt)
-		scrypt_hash_data(work->hash, work->data);
-	else
-#endif
-		hash_data(work->hash, work->data);
+	work_hash(work);
 	
 	if (!test_hash(work->hash, work->nonce_diff))
 		return TNR_BAD;
@@ -9912,7 +9900,7 @@ static void wait_lpcurrent(struct pool *pool)
 
 static curl_socket_t save_curl_socket(void *vpool, __maybe_unused curlsocktype purpose, struct curl_sockaddr *addr) {
 	struct pool *pool = vpool;
-	curl_socket_t sock = socket(addr->family, addr->socktype, addr->protocol);
+	curl_socket_t sock = bfg_socket(addr->family, addr->socktype, addr->protocol);
 	pool->lp_socket = sock;
 	return sock;
 }
@@ -10322,8 +10310,8 @@ void drv_set_defaults(const struct device_drv * const drv, const void *datap, vo
 /* Makes sure the hashmeter keeps going even if mining threads stall, updates
  * the screen at regular intervals, and restarts threads if they appear to have
  * died. */
-#define WATCHDOG_SICK_TIME		300
-#define WATCHDOG_DEAD_TIME		1800
+#define WATCHDOG_SICK_TIME		60
+#define WATCHDOG_DEAD_TIME		600
 #define WATCHDOG_SICK_COUNT		(WATCHDOG_SICK_TIME/WATCHDOG_INTERVAL)
 #define WATCHDOG_DEAD_COUNT		(WATCHDOG_DEAD_TIME/WATCHDOG_INTERVAL)
 

@@ -1,7 +1,43 @@
-BFGMiner Version 4.1.99 -> Custom Build 4 ZeusMiner
+BFGMiner Version 4.2.1 -> Custom Build for ZeusMiner
 - Zeus: New driver, supporting ZeusMiner scrypt only ASIC
+- Zeus: Bugfix of the difficulty counter
+- Zeus: Stability fix for higher clock and lower HW errors
+- Zeus: Driver rework, 50% done
+- Zeus: Changed command line options for
+Chips Count (FROM --chips-count TO --zeus-cc) > Default "6"
+Chips Clock (FROM --ltc-clk TO --zeus-clk) > Default "328"
+Check Golden (FROM --nocheck-golden TO --zeus-cg) > Default "false" and Check for Golden Speed currently deactivated
+Debug (FROM --ltc-debug TO --debug) > Related output changed to default debug information layer
+No Check Scrypt (--nocheck-scrypt) > removed as deprecated
 
->>> Darkwinde <Darkwinde@web.de>
+
+>>> Any issues? Report to Darkwinde <Darkwinde@web.de> @ LiteCoinTalk.org
+
+
+
+BFGMiner Version 4.2.0 - June 11, 2014
+
+- Upgraded Windows libmicrohttpd from 0.9.35 to 0.9.38_pre33603
+- SGW: Workaround BE Cube bugs with new libmicrohttpd by forcing HTTP 1.0
+response
+- rockminer: Increase hw error count for problems
+- rockminer: Autodetect with "R-BOX miner" or "RX-BOX miner" product strings
+- rockminer: Support for seeing and setting clock frequency in Manage TUI
+- rockminer: Include clock frequency in RPC processor status
+- rockminer: Support for setting clock frequency
+- rockminer: Workaround lost tasks by resending them
+- rockminer: Support for temperature sensors
+- rockminer: Debug messages
+- Bugfix: rockminer: Initialise rockminer_chip_data
+- Bugfix: rockminer: Ensure work actually exists before testing against it
+- rockminer: Mine at 270 MHz
+- rockminer: Implement mining (at 200 MHz)
+- DevAPI: Move device_proc_by_id out of bifury driver, since it is generically
+useful
+- rockminer: Detection code for new driver
+- bfg_socket wrapper to ensure sockets are close-on-exec
+- set_cloexec_socket: Explicitly cast SOCKET to HANDLE
+
 
 BFGMiner Version 4.1.0 - June 6, 2014
 - Bugfix: Ensure variables are declared even without ADL support

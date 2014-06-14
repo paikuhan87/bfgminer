@@ -1,178 +1,51 @@
 /*
- * This code based off the original Icarus code from and copyright by:
+ * This code based on the original Icarus code from and copyright by:
  * Copyright 2012 Luke Dashjr
  * Copyright 2012 Xiangfu <xiangfu@openmobilefree.com>
  * Copyright 2012 Andrew Smith
  *
- * The code was modified by Zeus Miners for inclusion in CGMiner 3.1.1,
- *  I assume there is a Copyright 2014 to their changes.
- *
- * Changes to the Zeus code :
- * Copyright 2014 Chris Hessing
+ * The original code was modified by ZeusMiner.com for CGMiner 3.1.1 branch
+ * and has been completely reworked for BFGminer by:
+ * Copyright 2014 Darkwinde
+ * Copyright 2014 jstefanop
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.  See COPYING for more details.
+ *
+ * Documentation for the behaviour of the Zeus ASICs can be found at:
+ * https://mega.co.nz/#F!eVM3xZIY!ogQPjmNfC-ahZuTkwyAWDw
  */
-
-/*
- * Documentation for the behavior of the Zeus ASICs can be found at :
- *  https://onedrive.live.com/view.aspx?resid=7B9890399DE89575!603&app=Word&authkey=!ABXOuckyMb5Cu2w
- */
-
-#include "config.h"
-#include "miner.h"
-
-#include <limits.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <dirent.h>
-#include <unistd.h>
-
-#ifndef WIN32
-  #include <termios.h>
-  #include <sys/stat.h>
-  #include <fcntl.h>
-  #ifndef O_CLOEXEC
-    #define O_CLOEXEC 0
-  #endif
-#else
-  #include <windows.h>
-  #include <io.h>
-#endif
-
-#include <math.h>
-#include "lowl-vcom.h"
-#include "compat.h"
-
-#define ZEUS_CHIP_GEN1_CORES 8
-#define ZEUS_CHIP_GEN 1
-#define ZEUS_CHIP_CORES ZEUS_CHIP_GEN1_CORES
-
-extern bool opt_ltc_debug;
-extern int opt_chips_count;
-extern int opt_chip_clk;
-extern bool opt_ltc_nocheck_golden;
-
-int zeus_opt_chips_count_max=1; 
-
-// The serial I/O speed - Linux uses a define 'B115200' in bits/termios.h
-#define ZEUS_IO_SPEED 115200
-
-// The size of a successful nonce read
-#define ZEUS_READ_SIZE 4
-
-// Ensure the sizes are correct for the Serial read
-#if (ZEUS_READ_SIZE != 4)
-#error ZEUS_READ_SIZE must be 4
-#endif
-#define ASSERT1(condition) __maybe_unused static char sizeof_uint32_t_must_be_4[(condition)?1:-1]
-ASSERT1(sizeof(uint32_t) == 4);
-
-#define zeus_open2(devpath, baud, purge)  serial_open(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, purge)
-#define zeus_open(devpath, baud)  zeus_open2(devpath, baud, false)
-
-#define ZEUS_GETS_ERROR -1
-#define ZEUS_GETS_OK 0
-#define ZEUS_GETS_RESTART 1
-#define ZEUS_GETS_TIMEOUT 2
+#include "driver-zeus.h"
 
 
-// Fraction of a second, USB timeout is measured in
-// i.e. 10 means 1/10 of a second
-#define ZEUS_TIME_FACTOR 10
-// It's 10 per second, thus value = 10/TIME_FACTOR =
-#define ZEUS_READ_FAULT_DECISECONDS 1
-
-struct ZEUS_INFO {
-
-  uint32_t read_count;
-  uint64_t golden_speed_percore;     // speed per core per sec
-
-  int check_num;
-  int baud;
-  int cores_perchip;
-  int chips_count_max;
-  int chips_count;
-  int chip_clk;
-  uint32_t clk_header;
-  int chips_bit_num;                 //log2(chips_count_max)
-  
-  char core_hash[10];
-  char chip_hash[10];
-  char board_hash[10];
-};
-
-
-// One for each possible device
-static struct ZEUS_INFO **zeus_info;
-
-// Looking for options in --zeus-timing and --zeus-options:
-//
-// Code increments this each time we start to look at a device
-// However, this means that if other devices are checked by
-// the Zeus code (e.g. BFL) they will count in the option offset
-//
-// This, however, is deterministic so that's OK
-//
-// If we were to increment after successfully finding an Zeus
-// that would be random since an Zeus may fail and thus we'd
-// not be able to predict the option order
-//
-// This also assumes that serial_detect() checks them sequentially
-// and in the order specified on the command line
-//
-static int option_offset = -1;
-
-uint8_t flush_buf[400];
-
-BFG_REGISTER_DRIVER(zeus_drv);
-
-//Calculates the target difficulty
-static const uint64_t diffone = 0xFFFF000000000000ull;
-static double target_diff(const unsigned char *target)
-{
-	uint64_t *data64, d64;
-	char rtarget[32];
-    
-	swab256(rtarget, target);
-	data64=(uint64_t *)(rtarget + 2);
-	d64=be64toh(*data64);
-	if(unlikely(!d64))
-		d64=1;
-	
-	return diffone/d64;
-}
 
 /**
  * Flush the UART on the Zeus controller board.
  **/
 void zeus_flush_uart(int fd)
 {
-#ifdef WIN32  
-  const HANDLE fh = (HANDLE)_get_osfhandle(fd);
-  
-  PurgeComm(fh, PURGE_RXCLEAR);
-#else
-  tcflush(fd, TCIFLUSH);
-#endif
+	#ifdef WIN32  
+		const HANDLE fh = (HANDLE)_get_osfhandle(fd);
+		PurgeComm(fh, PURGE_RXCLEAR);
+	#else
+		tcflush(fd, TCIFLUSH);
+	#endif
 }
 	
 /**
  * Calculate the log_2 of a value.
  **/
-int zeus_log_2(int value)   //非递归判断一个数是2的多少次方  
-{  
-  int x=0;  
-  while(value>1)  
-    {  
-      value>>=1;  
-      x++;  
-    }  
-  return x;  
+int zeus_log_2(int value) 
+{
+	int x=0;  
+	while(value>1)
+	{  
+		value>>=1;  
+		x++;  
+	}
+	return x;  
 }  
 
 uint32_t zeus_get_revindex(uint32_t value,int bit_num)
@@ -193,7 +66,6 @@ uint32_t zeus_get_revindex(uint32_t value,int bit_num)
     newvalue += value&0x01;
     value = value>>1;
   }
-  
   return newvalue; 
 }
 
@@ -222,18 +94,21 @@ static int zeus_gets(unsigned char *buf, int fd, struct timeval *tv_finish, stru
     ret = read(fd, buf, 1);
     
     if (ret < 0)
+	{		
       return ZEUS_GETS_ERROR;
-    
+    }
     if (first)
+	{
       cgtime(tv_finish);
-    
+    }
     if (ret >= read_amount)
+	{
       return ZEUS_GETS_OK;
-    
+    }
     if (ret > 0) {
       buf += ret;
       read_amount -= ret;
-      first = false;
+      first = false;	
       continue;
     }
     
@@ -261,26 +136,32 @@ static int zeus_gets(unsigned char *buf, int fd, struct timeval *tv_finish, stru
 
 static int zeus_write(int fd, const void *buf, size_t bufLen)
 {
-  size_t ret;
-#if 0                          // Change to 1 for additional debugging info.
-  char *hexstr;
-  hexstr = bin2hex(buf, bufLen);
-  applog(LOG_WARNING, "zeus_write %s", hexstr);
-  free(hexstr);
-#endif
+	#if 0 //PMA: implement DEBUG command
+		char hex[(bufLen * 2) + 1];
+		bin2hex(hex, buf, bufLen);
+		applog(LOG_ERR, "fd=%d: HEX: %s", fd, hex);
+	#endif
 
-  ret = write(fd, buf, bufLen);
-  if (unlikely(ret != bufLen))
-    return 1;
-  
-  return 0;
+	size_t ret;
+	if (unlikely(fd == -1))
+		return 1;
+	
+	ret = write(fd, buf, bufLen);
+	if (unlikely(ret != bufLen))
+		return 1;
+		
+	return 0;
 }
 
 static void zeus_shutdown(struct thr_info *thr)
 {
-  struct cgpu_info *zeus = thr->cgpu;
-  close(zeus->device_fd);
-  zeus->device_fd = -1;
+	struct cgpu_info *zeus = thr->cgpu;
+	const int fd = zeus->device_fd;
+	if (fd == -1)
+		return;
+	zeus_close(fd);
+	zeus->device_fd = -1;
+	free(thr->cgpu_data);
 }
 
 
@@ -292,249 +173,261 @@ int zeus_update_num(int chips_count)
       return i;
     }
   }
-
   return 1024;
+}
+
+
+// Number of bytes remaining after reading a nonce from Zeus
+int zeus_excess_nonce_size(int fd, struct ZEUS_INFO *info)
+{
+	// How big a buffer?
+	int excess_size = info->read_size - ZEUS_NONCE_SIZE;
+
+	// Try to read one more to ensure the device doesn't return
+	// more than we want for this driver
+	excess_size++;
+
+	unsigned char excess_bin[excess_size];
+	// Read excess_size from Zeus
+	struct timeval tv_now;
+	timer_set_now(&tv_now);
+//PMA: Is this required? Needs to be checked
+	//zeus_gets(excess_bin, fd, &tv_now, NULL, 1, excess_size);
+	int bytes_read = read(fd, excess_bin, excess_size);
+	
+	// Number of bytes that were still available
+	return bytes_read;
+}
+
+//Calculates the target difficulty
+static double target_diff(const unsigned char *target)
+{
+	uint64_t *data64, d64;
+	char rtarget[32];
+ 
+	swab256(rtarget, target);
+	data64=(uint64_t *)(rtarget + 2);
+	d64=be64toh(*data64);
+	if(unlikely(!d64))
+		d64=1;
+ 	
+ 	return diff_one/d64;
+}
+
+static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, struct ZEUS_INFO *info)
+{
+	unsigned char nonce_bin[ZEUS_NONCE_SIZE];
+	char nonce_hex[(sizeof(nonce_bin) * 2) + 1];	
+	int baud = info->baud;
+
+	int fd = zeus_open2(devpath, baud, true);
+	if (unlikely(fd == -1))
+	{
+		applog(LOG_ERR, "Please restart BFGminer: Failed to open %s", devpath);
+		return false;
+	}
+
+	char golden_ob[] = 
+	"55aa0001"
+	"00038000063b0b1b028f32535e900609c15dc49a42b1d8492a6dd4f8f15295c989a1decf584a6aa93be26066d3185f55ef635b5865a7a79b7fa74121a6bb819da416328a9bd2f8cef72794bf02000000";
+		
+	char golden_ob2[] = 
+	"55aa00ff"
+	"c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
+		
+	const char golden_nonce[] = "00038d26";
+
+	int ob_size = strlen(golden_ob)/2;
+	unsigned char ob_bin[ob_size];	
+	
+	char clk_header_str[10];
+	uint32_t clk_reg_init;
+	uint32_t clk_reg= (uint32_t)(info->chip_clk*2/3);
+	if(clk_reg>(100))
+		clk_reg_init = 110;
+	else
+		clk_reg_init = 92;
+	
+	uint32_t clk_header = (clk_reg_init<<24)+((0xff-clk_reg_init)<<16);
+	sprintf(clk_header_str,"%08x",clk_header+0x01);
+	memcpy(golden_ob2,clk_header_str,8);
+  
+	hex2bin(ob_bin, golden_ob2, ob_size);
+	for (int i = 0; i < 3; i++)
+	{
+		zeus_flush_uart(fd);
+		zeus_write(fd, ob_bin, ob_size);
+		sleep(1);	
+	}
+	read(fd, flush_buf, 400);
+
+	clk_header = (clk_reg<<24)+((0xff-clk_reg)<<16);
+	sprintf(clk_header_str,"%08x",clk_header+0x01);
+	memcpy(golden_ob2,clk_header_str,8);
+  
+	hex2bin(ob_bin, golden_ob2, ob_size);
+	for (int i = 0; i < 2; i++)
+	{
+		zeus_flush_uart(fd);
+		zeus_write(fd, ob_bin, ob_size);
+		sleep(1);		
+	}
+ 
+	clk_header = (clk_reg<<24)+((0xff-clk_reg)<<16);
+	sprintf(clk_header_str,"%08x",clk_header+1);
+	memcpy(golden_ob,clk_header_str,8);
+		
+	int bytes_left = zeus_excess_nonce_size(fd, info);
+	if (info->read_size - ZEUS_NONCE_SIZE != bytes_left) 
+	{
+		applog(LOG_ERR, "%s: Test failed at %s: expected %d bytes, got %d",
+			   dev->dname, devpath, info->read_size, ZEUS_NONCE_SIZE + bytes_left);
+		zeus_close(fd);
+		return false;
+	}
+
+	if (serial_claim_v(devpath, dev))
+	{
+		zeus_close(fd);
+		return false;
+	}
+	
+	//PMA: Disabled until GETS is fixed by rework
+	struct timeval golden_tv;
+	opt_check_golden = false;
+	if (opt_check_golden)
+	{
+		struct timeval tv_start, tv_finish;
+		zeus_flush_uart(fd);
+		hex2bin(ob_bin, golden_ob, ob_size);
+		zeus_write(fd, ob_bin, ob_size);
+	
+		cgtime(&tv_start);
+		memset(nonce_bin, 0, sizeof(nonce_bin));
+	
+		uint32_t elapsed_count;
+		zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, &elapsed_count);
+		timersub(&tv_finish, &tv_start, &golden_tv);
+		//PMA: Re-Integration required
+		//zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, &elapsed_count, ZEUS_NONCE_SIZE);
+	
+		bin2hex(nonce_hex, nonce_bin, sizeof(nonce_bin));
+		if (strncmp(nonce_hex, golden_nonce, 8))
+		{
+			applog(LOG_ERR, "%s: Test failed at %s: get %s, should: %s",
+				dev->dname, devpath, nonce_hex, golden_nonce);
+			zeus_close(fd);
+			return false;
+		}
+		info->golden_speed_percore = (uint64_t)(((double)0xd26)/((double)(golden_tv.tv_sec) + ((double)(golden_tv.tv_usec))/((double)1000000)));
+		applog(LOG_ERR, "__PMA__: Speed: %d or %I64d ", info->golden_speed_percore, info->golden_speed_percore);
+	}	
+	
+	info->clk_header = clk_header;
+	info->golden_ob = golden_ob;
+	info->golden_ob2 = golden_ob2;
+	info->golden_nonce = golden_nonce;
+	info->golden_tv = golden_tv;
+	
+	// Create a new Zeus
+	struct cgpu_info *zeus;
+	zeus = calloc(1, sizeof(struct cgpu_info));
+	zeus->drv = dev;
+	zeus->device_path = strdup(devpath);
+	zeus->device_fd = -1;
+	zeus->threads = 1;
+	add_cgpu(zeus);	
+	zeus->device_data = info;
+	
+	applog(LOG_INFO, "Found %"PRIpreprv" at %s", zeus->proc_repr, devpath);
+	if(opt_debug)
+	{
+		applog(LOG_ERR, "Found %"PRIpreprv" at %s,  Init: baud=%d with the following parameters:", zeus->proc_repr, devpath, baud);
+		applog(LOG_ERR, "[Speed] %iMhz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s], readcount:%d, bitnum:%d",
+		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000, info->read_count, info->chips_bit_num);
+	}
+	zeus_close(fd);
+	return true;
 }
 
 static bool zeus_detect_one(const char *devpath)
 {
-  int this_option_offset = ++option_offset;
-  
-  struct ZEUS_INFO *info;
-  int fd;
-  struct timeval tv_start, tv_finish;
-  struct timeval golden_tv;
-  
-  int numbytes = 84;
-  
-  int baud, cores_perchip, chips_count_max,chips_count;
-  uint32_t clk_reg;
-  uint32_t clk_reg_init;
-  uint64_t golden_speed_percore;
-  
-#if 1	
-  if(opt_chip_clk>(0xff*3/2)){
-    opt_chip_clk = 0xff*3/2;
-  }
-  else if(opt_chip_clk<2){
-    opt_chip_clk = 2;
-  }
-  
-  clk_reg= (uint32_t)(opt_chip_clk*2/3);
-#endif
-		
-  char clk_header_str[10];
-  
-  
-
-#if 1
-  char golden_ob[] =
-    "55aa0001"
-    "00038000063b0b1b028f32535e900609c15dc49a42b1d8492a6dd4f8f15295c989a1decf584a6aa93be26066d3185f55ef635b5865a7a79b7fa74121a6bb819da416328a9bd2f8cef72794bf02000000";
-
-  char golden_ob2[] =
-    "55aa00ff"
-    "c00278894532091be6f16a5381ad33619dacb9e6a4a6e79956aac97b51112bfb93dc450b8fc765181a344b6244d42d78625f5c39463bbfdc10405ff711dc1222dd065b015ac9c2c66e28da7202000000";
-
-  const char golden_nonce[] = "00038d26";
-  const uint32_t golden_nonce_val = 0x00038d26;// 0xd26= 3366
-#endif
-
-  unsigned char ob_bin[84], nonce_bin[ZEUS_READ_SIZE];
-  char *nonce_hex;
-
-  baud = ZEUS_IO_SPEED;
-  cores_perchip = ZEUS_CHIP_CORES;
-  chips_count = opt_chips_count;
-
-  if(chips_count>zeus_opt_chips_count_max){
-    zeus_opt_chips_count_max = zeus_update_num(chips_count);
-  }
-  chips_count_max = zeus_opt_chips_count_max;
-  
-  applog(LOG_DEBUG, "Zeus Detect: Attempting to open %s", devpath);
-		
-  fd = zeus_open2(devpath, baud, true);
-  if (unlikely(fd == -1)) {
-    applog(LOG_ERR, "Zeus Detect: Failed to open %s", devpath);
-    return false;
-  }
-		
-  uint32_t clk_header;
-
-  //from 150M step to the high or low speed. we need to add delay and resend to init chip
-
-  if(clk_reg>(150*2/3)){
-    clk_reg_init = 165*2/3;
-  }
-  else {
-    clk_reg_init = 139*2/3;
-  }
-  
-  zeus_flush_uart(fd);
-  
-  clk_header = (clk_reg_init<<24)+((0xff-clk_reg_init)<<16);
-  sprintf(clk_header_str,"%08x",clk_header+0x01);
-  memcpy(golden_ob2,clk_header_str,8);
-  
-  hex2bin(ob_bin, golden_ob2, numbytes);
-  for (int i = 0; i < 2; i++) {
-    zeus_write(fd, ob_bin, numbytes);
-    sleep(1);
-    zeus_flush_uart(fd);
-  }
-
-  zeus_write(fd, ob_bin, numbytes);
-  int discard = read(fd, flush_buf, 400);
-  
-  
-  clk_header = (clk_reg<<24)+((0xff-clk_reg)<<16);
-  sprintf(clk_header_str,"%08x",clk_header+0x01);
-  memcpy(golden_ob2,clk_header_str,8);
-  
-  hex2bin(ob_bin, golden_ob2, numbytes);
-
-  for (int i = 0; i < 2; i++) {
-    zeus_write(fd, ob_bin, numbytes);
-    sleep(1);
-    zeus_flush_uart(fd);
-  }
- 
-  clk_header = (clk_reg<<24)+((0xff-clk_reg)<<16);
-  sprintf(clk_header_str,"%08x",clk_header+1);
-  memcpy(golden_ob,clk_header_str,8);
-  
-  
-  if (opt_ltc_nocheck_golden==false){
-    
-    discard = read(fd, flush_buf, 400);
-    hex2bin(ob_bin, golden_ob, numbytes);	
-    zeus_write(fd, ob_bin, numbytes);
-    cgtime(&tv_start);
-    
-    memset(nonce_bin, 0, sizeof(nonce_bin));
-    
-    uint32_t elapsed_count;
-    zeus_gets(nonce_bin, fd, &tv_finish, NULL, 50,&elapsed_count);
-    
-    close(fd);
-    
-    nonce_hex = calloc(1, (sizeof(nonce_bin)+1)*2);
-    bin2hex(nonce_hex, (void *)&nonce_bin, sizeof(nonce_bin));
-    if (strncmp(nonce_hex, golden_nonce, 8)) {
-      applog(LOG_ERR,
-	     "Zeus Detect: "
-	     "Test failed at %s: get %s, should: %s",
-	     devpath, nonce_hex, golden_nonce);
-      free(nonce_hex);
-      return false;
-    }
-    
-    timersub(&tv_finish, &tv_start, &golden_tv);
-    
-    golden_speed_percore = (uint64_t)(((double)0xd26)/((double)(golden_tv.tv_sec) + ((double)(golden_tv.tv_usec))/((double)1000000)));
-    
-    if(opt_ltc_debug){
-      applog(LOG_ERR,
-	     "[Test succeeded] at %s: got %s.",
-	     devpath, nonce_hex);
-    }
-    
-    free(nonce_hex);
-  }
-  else{
-		
-    close(fd);
-    golden_speed_percore = (((opt_chip_clk*2)/3)*1024)/8;
-  }
-
-  /* We have a real Zeus! */
-  struct cgpu_info *zeus;
-  zeus = calloc(1, sizeof(struct cgpu_info));
-  zeus->drv = &zeus_drv;
-  zeus->device_path = strdup(devpath);
-  zeus->device_fd = -1;
-  zeus->threads = 1;
-  add_cgpu(zeus);
-  zeus_info = realloc(zeus_info, sizeof(struct ZEUS_INFO *) * (total_devices + 1));
-  
-  applog(LOG_INFO, "Found Zeus at %s, mark as %d",
-	 devpath, zeus->device_id);
-  
-  applog(LOG_DEBUG, "Zeus: Init: %d baud=%d cores_perchip=%d chips_count=%d",
-	 zeus->device_id, baud, cores_perchip, chips_count);
-  
-  // Since we are adding a new device on the end it needs to always be allocated
-  zeus_info[zeus->device_id] = (struct ZEUS_INFO *)malloc(sizeof(struct ZEUS_INFO));
-  if (unlikely(!(zeus_info[zeus->device_id])))
-    quit(1, "Failed to malloc ZEUS_INFO");
-
-  info = zeus_info[zeus->device_id];
-  
-  // Initialise everything to zero for a new device
-  memset(info, 0, sizeof(struct ZEUS_INFO));
-  
-  info->check_num = 0x1234;
-  info->baud = baud;
-  info->cores_perchip = cores_perchip;
-  info->chips_count = chips_count;
-  info->chips_count_max= chips_count_max;
-  if ((chips_count_max &(chips_count_max-1))!=0){
-    quit(1, "chips_count_max  must be 2^n");
-  }	
-  info->chips_bit_num = zeus_log_2(chips_count_max);
-  info->golden_speed_percore = golden_speed_percore;
-  
-  info->read_count = (uint32_t)((4294967296*10)/(cores_perchip*chips_count_max*golden_speed_percore*2));
-
-  info->read_count = info->read_count*3/4;
-
-  info->chip_clk=opt_chip_clk;
+	struct ZEUS_INFO *info = calloc(1, sizeof(struct ZEUS_INFO));
+	if (unlikely(!info))
+		quit(1, "Failed to malloc ZEUS_INFO");
 	
-  info->clk_header=clk_header;
+	info->check_num = 0x1234;	
+	info->baud = ZEUS_IO_SPEED;
+	info->read_size = ZEUS_READ_SIZE;
+	info->probe_read_count = 50;
+	info->cores_perchip = ZEUS_CHIP_CORES;
+	info->chips_count = opt_chips_count;
+	//max clock 381MHz, min clock 200MHz
+	if(opt_chip_clk>381)
+		info->chip_clk = 381;
+	else if(opt_chip_clk<200)
+		info->chip_clk = 200;
+	else
+		info->chip_clk = opt_chip_clk;
+	if(info->chips_count>ZEUS_CHIPS_COUNT_MAX)
+	{
+		info->chips_count_max = zeus_update_num(info->chips_count);
+	}
+	info->chips_bit_num = zeus_log_2(info->chips_count_max);
+	info->golden_speed_percore = (((info->chip_clk*2)/3)*1024)/8*1.1;
+
+	info->core_hash = info->golden_speed_percore;
+	info->chip_hash = info->golden_speed_percore*info->cores_perchip;
+	info->board_hash = info->golden_speed_percore*info->cores_perchip*info->chips_count;
 	
+	info->read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
+	info->read_count = info->read_count*0.76;
+	
+	if (!zeus_detect_custom(devpath, &zeus_drv, info))
+	{
+		free(info);
+		return false;
+	}
 
-  if(opt_ltc_debug){
-    applog(LOG_ERR,
-	   "[Speed] %dMhz core|chip|board: [%s/s], [%s/s], [%s/s], readcount:%d,bitnum:%d ",
-	   info->chip_clk,info->core_hash,info->chip_hash,info->board_hash,info->read_count,info->chips_bit_num);
-
-  }
-
-  return true;
+	return true;
 }
+
 
 static bool zeus_lowl_probe(const struct lowlevel_device_info * const info)
 {
-  return vcom_lowl_probe_wrapper(info, zeus_detect_one);
+	return vcom_lowl_probe_wrapper(info, zeus_detect_one);
 }
 
 static bool zeus_prepare(struct thr_info *thr)
 {
-  struct cgpu_info *zeus = thr->cgpu;
-  
-  zeus->device_fd = -1;
+	struct cgpu_info *zeus = thr->cgpu; 
+	struct ZEUS_INFO *info = zeus->device_data;	
+	// PMA: Required first run? Think not. Has to be checked by rework
+	//struct ZEUS_STATE *state;
+	//thr->cgpu_data = state = calloc(1, sizeof(*state));
+	//state->firstrun = true;
+	
+	int fd = zeus_open2(zeus->device_path, info->baud, true);
+	if (unlikely(-1 == fd))
+	{
+		applog(LOG_ERR, "Failed to open Zeus on %s", zeus->device_path);
+		return false;
+	}
 
-  int fd = zeus_open(zeus->device_path, zeus_info[zeus->device_id]->baud);
-  if (unlikely(-1 == fd)) {
-    applog(LOG_ERR, "Failed to open Zeus on %s",
-	   zeus->device_path);
-    return false;
-  }
-
-  zeus->device_fd = fd;
-  zeus->min_nonce_diff = 1./0x10000;
+	zeus->device_fd = fd;
+//PMA: Also required? Has to be checked by rework	
+	zeus->min_nonce_diff = ZEUS_MIN_NONCE_DIFF;		
+	zeus->status = LIFE_INIT2;
   
-  applog(LOG_INFO, "Opened Zeus on %s", zeus->device_path);
-  
-  return true;
+	applog(LOG_INFO, "Opened Zeus %i (fd=%i) on %s", zeus->device_id, zeus->device_fd, zeus->device_path);
+	
+	return true;
 }
 
-void update_chip_stat(struct ZEUS_INFO *info,uint32_t nonce);
 
 
-static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
-				__maybe_unused int64_t max_nonce)
+
+static int64_t zeus_scanhash(struct thr_info *thr, struct work *work, __maybe_unused int64_t max_nonce)
 {
   struct cgpu_info *zeus;
   int fd;
@@ -559,7 +452,7 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
   zeus = thr->cgpu;
   if (zeus->device_fd == -1)
     if (!zeus_prepare(thr)) {
-      applog(LOG_ERR, "%s%i: Comms error", zeus->drv->name, zeus->device_id);
+      applog(LOG_ERR, "%s%i: Connection error", zeus->drv->name, zeus->device_id);
       dev_error(zeus, REASON_DEV_COMMS_ERROR);
       
       // fail the device if the reopen attempt fails
@@ -567,18 +460,18 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
     }
 
   fd = zeus->device_fd;
-  info = zeus_info[zeus->device_id];
+  info = zeus->device_data;
 
   uint32_t clock = info->clk_header;
 
-  uint32_t diff = floor(target_diff(work->target));
-  applog(LOG_DEBUG, "Work Diff: %d", diff);
+uint32_t diff = floor(target_diff(work->target));
+applog(LOG_DEBUG, "Work Diff: %d", diff);
 
-  if(diff < 1) diff = 1;
+if(diff < 1) diff = 1;
 		
   uint32_t target_me = 0xffff/diff;
   uint32_t header = clock+target_me;
-	
+
 #if !defined (__BIG_ENDIAN__) && !defined(MIPSEB)
   header = header;
 #else
@@ -590,7 +483,7 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
   rev(ob_bin, 4);
   rev(ob_bin+4, 80);
 
-  if (opt_ltc_debug & 0x01) {
+  if (opt_debug & 0x01) {
     char nonce2[32];
 
     ob_hex = calloc(1, (8+1)*2);
@@ -618,12 +511,13 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
   /* Zeus will return 4 bytes (ZEUS_READ_SIZE) nonces or nothing */
   memset(nonce_bin, 0, sizeof(nonce_bin));
 
-  if (opt_ltc_debug&0) {
+  if (opt_debug&0) {
     applog(LOG_ERR, "diff is %d",diff);
   }
 
   uint32_t elapsed_count;
   uint32_t read_count = info->read_count;
+
   while(1){		
     ret = zeus_gets(nonce_bin, fd, &tv_finish, thr, read_count,&elapsed_count);
     if (ret == ZEUS_GETS_ERROR) {
@@ -632,6 +526,7 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
       dev_error(zeus, REASON_DEV_COMMS_ERROR);
       return 0;
     }
+
 #ifndef WIN32
 //openwrt
     zeus_flush_uart(fd);
@@ -642,7 +537,7 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
     // aborted before becoming idle, get new work
     if (ret == ZEUS_GETS_TIMEOUT || ret == ZEUS_GETS_RESTART) {
       
-      if (opt_ltc_debug&1) {
+      if (opt_debug&1) {
 	applog(LOG_ERR, "1restart or 2timeout:%d ",ret);
       }
 
@@ -675,57 +570,59 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work,
     submit_nonce(thr, work, nonce);
     
     was_hw_error = (curr_hw_errors < zeus->hw_errors);
-    
+ 
     if (was_hw_error){			
       zeus_flush_uart(fd);
-      if (opt_ltc_debug&&1) {
+	  applog(LOG_ERR, "HW Error of calculating nonce: %08x ", nonce);
+      if (opt_debug&&1) {
 	applog(LOG_ERR, "ERR nonce:%08x ",nonce);
       }
     }
     else {			
-      if (opt_ltc_debug&&0) {
+      if (opt_debug&&0) {
 #if ZEUS_CHIP_GEN==1
 	uint32_t chip_index=zeus_get_revindex(nonce,info->chips_bit_num);
 				uint32_t core_index=(nonce&0xe0000000)>>29;
 #else
 #error
 #endif
+
 	applog(LOG_ERR, "nonce:%08x,chip_index:%d ",nonce,chip_index);
       }			
     }
+
   }
 }
 
 
 static struct api_data *zeus_api_stats(struct cgpu_info *cgpu)
 {
-  struct api_data *root = NULL;
-  struct ZEUS_INFO *info = zeus_info[cgpu->device_id];
+	struct api_data *root = NULL;
+	struct ZEUS_INFO *info = zeus_info[cgpu->device_id];
 
-  // Warning, access to these is not locked - but we don't really
-  // care since hashing performance is way more important than
-  // locking access to displaying API debug 'stats'
-  // If locking becomes an issue for any of them, use copy_data=true also
-  root = api_add_string(root, "golden_speed_chip", info->chip_hash, false);
-  root = api_add_int(root, "chipclk", &(info->chip_clk), false);
-  root = api_add_int(root, "chips_count", &(info->chips_count), false);
-  root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
-  root = api_add_uint32(root, "readcount", &(info->read_count), false);
+	root = api_add_uint32(root, "golden_speed_chip", &(info->chip_hash), false);
+	root = api_add_int(root, "chipclk", &(info->chip_clk), false);
+	root = api_add_int(root, "chips_count", &(info->chips_count), false);
+	root = api_add_int(root, "chips_count_max", &(info->chips_count_max), false);
+	root = api_add_uint32(root, "readcount", &(info->read_count), false);
 
-  return root;
+	return root;
 }
 
-struct device_drv zeus_drv = {
-  
-  .dname = "zeus",
-  .name = "ZUS",
-
-  .supported_algos = POW_SCRYPT,
-
-  // detect device
-  .lowl_probe = zeus_lowl_probe,
-  .get_api_stats = zeus_api_stats,
-  .thread_prepare = zeus_prepare,
-  .scanhash = zeus_scanhash,
-  .thread_shutdown = zeus_shutdown,
+struct device_drv zeus_drv = 
+{
+	.dname = "zeus",
+	.name = "ZUS",
+	.probe_priority = -115,
+	.supported_algos = POW_SCRYPT,
+	.lowl_probe = zeus_lowl_probe,
+	.get_api_stats = zeus_api_stats,
+	.thread_prepare = zeus_prepare,
+	.scanhash = zeus_scanhash,
+	.minerloop = minerloop_scanhash,
+	.thread_disable = close_device_fd,
+	.thread_shutdown = zeus_shutdown,
 };
+
+
+	

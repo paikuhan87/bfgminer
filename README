@@ -1,9 +1,9 @@
  --------------------------------------------
-| Custom Build bfgminer 4.1.99 for ZeusMiner |
+| Custom Build bfgminer 4.2.1 for ZeusMiner |
  --------------------------------------------
 BASED ON:
-BFG Miner: https://github.com/luke-jr/bfgminer
-Zeus Miner: http://zeusminer.com/
+> BFG Miner: https://github.com/luke-jr/bfgminer
+> Zeus Miner: http://zeusminer.com/
 
 
 
@@ -22,15 +22,15 @@ make
 
 
 START MINER WINDOWS:
-./bfgminer --scrypt -o stratum+tcp://URL:PORT -u USERNAME -p PASSWORD --nocheck-golden --chips-count 6 --ltc-clk 328 -S zeus:\\.\COM5
+./bfgminer --scrypt -o stratum+tcp://URL:PORT -u USERNAME -p PASSWORD --zeus-cc 6 --zeus-clk 328 -S zeus:\\.\COM5
 
 START MINER LINUx:
-./bfgminer --scrypt -o stratum+tcp://URL:PORT -u USERNAME -p PASSWORD --nocheck-golden --chips-count 6 --ltc-clk 328 -S zeus:/dev/ttyUSB0
+./bfgminer --scrypt -o stratum+tcp://URL:PORT -u USERNAME -p PASSWORD --zeus-cc 6 --zeus-clk 328 -S zeus:/dev/ttyUSB0
 
 
 
 HINTS:
-Chips-Count
+Chips-Count (--zeus-cc)
    Blizzard: 6
    Cyclone: 96
    Hurricane X2: 48 (2*24)
@@ -38,11 +38,11 @@ Chips-Count
    Thunder X2: 96 (4*24)
    Thunder X3: 128 (4*32)
 
-LTC-CLK (Core Clock)
+Chip Frequency (--zeus-clk)
 Start with 280 and increase the clock frequency step by step until the hardware errors got to high (>10%).
-The most likely spot seems to be a value of 328.
+The most likely spot seems to be a value of 328 (default value).
 
-S (Searching for Devices)
+Searching for Devices (-S)
 Depending on your infrastructure you might can use search all or set a specific USB port. The port name depends on the interfaces the miner plugged to.
 You can figure it out by using command: 
 ls /dev/tty*
@@ -78,7 +78,7 @@ groupadd plugdev
 
 
  -----------------------------------
-| Original Readme of bfgminer 4.1.0 |
+| Original Readme of bfgminer 4.2.0 |
  -----------------------------------
 BFGMiner:
 St. Barbara's Faithfully Glorified Mining Initiative Naturally Exceeding Rivals

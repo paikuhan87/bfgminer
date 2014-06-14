@@ -244,7 +244,7 @@ bfgminer_SOURCES += driver-antminer.c
 endif
 
 if USE_ZEUS
-bfgminer_SOURCES += driver-zeus.c 
+bfgminer_SOURCES += driver-zeus.c driver-zeus.h
 endif
 
 if USE_GC3355
@@ -322,6 +322,10 @@ endif
 
 if USE_HASHFAST
 bfgminer_SOURCES += driver-hashfast.c
+endif
+
+if USE_ROCKMINER
+bfgminer_SOURCES += driver-rockminer.c
 endif
 
 if NEED_BFG_LOWL_FTDI

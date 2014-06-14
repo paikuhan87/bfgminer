@@ -13,8 +13,8 @@ dnl * any later version.  See COPYING for more details.
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [4])
-m4_define([v_min], [1])
-m4_define([v_mic], [99])
+m4_define([v_min], [2])
+m4_define([v_mic], [1])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_ver], [v_maj.v_min.v_mic])
 m4_define([lt_rev], m4_eval(v_maj + v_min))
@@ -1052,6 +1052,21 @@ if test "x$metabank" = "xyes"; then
 	AC_DEFINE([USE_METABANK], [1], [Defined to 1 if Metabank support is wanted])
 fi
 AM_CONDITIONAL([HAS_METABANK], [test x$metabank = xyes])
+
+
+driverlist="$driverlist rockminer"
+AC_ARG_ENABLE([rockminer],
+	[AC_HELP_STRING([--disable-rockminer],[Compile support for RockMiner (default enabled)])],
+	[rockminer=$enableval],
+	[rockminer=$ddyes]
+)
+if test "x$rockminer" = xyes; then
+	AC_DEFINE([USE_ROCKMINER], [1], [Defined to 1 if RockMiner support is wanted])
+	need_lowl_vcom=yes
+	has_asic=yes
+	have_udevrules=true
+fi
+AM_CONDITIONAL([USE_ROCKMINER], [test x$rockminer = xyes])
 
 
 if test "x$need_lowl_vcom" != "xno"; then
