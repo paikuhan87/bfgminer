@@ -54,6 +54,7 @@ extern bool opt_debug;
 extern bool opt_check_golden;
 extern int opt_chips_count;
 extern int opt_chip_clk;
+extern bool opt_chip_clk_override;
 /**
  * Internal variables
  **/

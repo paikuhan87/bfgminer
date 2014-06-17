@@ -363,7 +363,12 @@ static bool zeus_detect_one(const char *devpath)
 	info->cores_perchip = ZEUS_CHIP_CORES;
 	info->chips_count = opt_chips_count;
 	//max clock 381MHz, min clock 200MHz
-	if(opt_chip_clk>381)
+	if (opt_chip_clk_override)
+	{
+		info->chip_clk = opt_chip_clk;
+		applog(LOG_ERR, "Clock override to %iMHz", info->chip_clk);
+	}
+	else if(opt_chip_clk>381)
 		info->chip_clk = 381;
 	else if(opt_chip_clk<200)
 		info->chip_clk = 200;
