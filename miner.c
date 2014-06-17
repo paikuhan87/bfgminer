@@ -224,7 +224,6 @@ bool have_libusb;
 bool opt_check_golden = false;
 int opt_chips_count = 6;
 int opt_chip_clk = 328;
-bool opt_chip_clk_override = false;
 
 static bool opt_submit_stale = true;
 static float opt_shares;
@@ -2450,10 +2449,7 @@ static struct opt_table opt_config_table[] = {
 		 "ZEUS: Chips count on _one_ port (Default: 6)"),
 	OPT_WITH_ARG("--zeus-clk",
 		 set_int_1_to_65535, opt_show_intval, &opt_chip_clk,
-		 "ZEUS: Chip clock in Mhz (Default: 328)"),
-	OPT_WITHOUT_ARG("--zeus-clk-override",
-		 opt_set_bool, &opt_chip_clk_override,
-		 "ZEUS: Clock override to set values above 381MHz (own risk!!!)"),			 
+		 "ZEUS: Chip clock in Mhz (Default: 328)"),		 
 #endif
 	OPT_ENDTABLE
 };
