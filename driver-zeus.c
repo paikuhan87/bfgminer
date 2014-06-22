@@ -81,66 +81,57 @@ static void rev(unsigned char *s, size_t l)
   }
 }
 
-static int zeus_gets(unsigned char *buf, int fd, struct timeval *tv_finish, struct thr_info *thr, int read_count,uint32_t *elapsed_count)
+static int zeus_gets(unsigned char *buf, int fd, struct timeval *tv_finish, struct thr_info *thr, int read_count, int read_size)
 {
-  ssize_t ret = 0;
-  int rc = 0;
-  int read_amount = ZEUS_READ_SIZE;
-  bool first = true;
-  
-  *elapsed_count = 0;
-  // Read reply 1 byte at a time to get earliest tv_finish
-  while (true) {
-    ret = read(fd, buf, 1);
-    
-    if (ret < 0)
-	{		
-      return ZEUS_GETS_ERROR;
-    }
-    if (first)
+	ssize_t ret = 0;
+	int rc = 0;
+	int read_amount = read_size;
+	bool first = true;  
+		
+	while (true)
 	{
-      cgtime(tv_finish);
-    }
-    if (ret >= read_amount)
-	{
-      return ZEUS_GETS_OK;
-    }
-    if (ret > 0) {
-      buf += ret;
-      read_amount -= ret;
-      first = false;	
-      continue;
-    }
-    
-    rc++;
-    *elapsed_count=rc;
-    if (rc >= read_count) {
-      if (opt_debug) {
-	applog(LOG_DEBUG,
-	       "Zeus Read: No data in %.2f seconds",
-	       (float)rc/(float)ZEUS_TIME_FACTOR);
-      }
-      return ZEUS_GETS_TIMEOUT;
-    }
-    
-    if (thr && thr->work_restart) {
-      if (opt_debug) {
-	applog(LOG_DEBUG,
-	       "Zeus Read: Work restart at %.2f seconds",
-	       (float)(rc)/(float)ZEUS_TIME_FACTOR);
-      }
-      return ZEUS_GETS_RESTART;
-    }
-  }
+		ret = read(fd, buf, 1);
+		if (ret < 0)
+			return ZEUS_GETS_ERROR;
+
+		if (first)
+			cgtime(tv_finish);
+
+		if (ret >= read_amount)
+		{
+			return ZEUS_GETS_OK;
+		}
+
+		if (ret > 0) {
+			buf += ret;
+			read_amount -= ret;
+			first = false;
+			continue;
+		}
+			
+		if (thr && thr->work_restart) {
+			applog(LOG_DEBUG, "%s: Interrupted by work restart", __func__);
+			applog(LOG_DEBUG, "Zeus Read: Work restart at %.2f seconds", (float)(rc)/(float)ZEUS_TIME_FACTOR);
+			return ZEUS_GETS_RESTART;
+		}
+
+		rc++;
+		if (rc >= read_count) {
+			applog(LOG_DEBUG, "%s: No data in %.2f seconds", __func__,
+			       (float)rc/(float)ZEUS_TIME_FACTOR);
+			return ZEUS_GETS_TIMEOUT;
+		}
+	}
 }
 
 static int zeus_write(int fd, const void *buf, size_t bufLen)
 {
-	#if 0 //PMA: implement DEBUG command
+	if (opt_debug)
+	{
 		char hex[(bufLen * 2) + 1];
 		bin2hex(hex, buf, bufLen);
 		applog(LOG_ERR, "fd=%d: HEX: %s", fd, hex);
-	#endif
+	}
 
 	size_t ret;
 	if (unlikely(fd == -1))
@@ -306,10 +297,10 @@ static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, stru
 		memset(nonce_bin, 0, sizeof(nonce_bin));
 	
 		uint32_t elapsed_count;
-		zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, &elapsed_count);
+		zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, info->read_size);
 		timersub(&tv_finish, &tv_start, &golden_tv);
 		//PMA: Re-Integration required
-		//zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, &elapsed_count, ZEUS_NONCE_SIZE);
+		//zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, info->read_size);
 	
 		bin2hex(nonce_hex, nonce_bin, sizeof(nonce_bin));
 		if (strncmp(nonce_hex, golden_nonce, 8))
@@ -339,10 +330,10 @@ static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, stru
 	add_cgpu(zeus);	
 	zeus->device_data = info;
 	
-	applog(LOG_INFO, "Zeus %i at %s (Init: baud=%d, readcount=%d, bitnum=%d)with the following parameters:", zeus->device_id, devpath, baud, info->read_count, info->chips_bit_num);
-	applog(LOG_INFO, "[Speed] %iMHz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s]",
+	applog(LOG_DEBUG, "Zeus %i at %s (Init: baud=%d, readcount=%d, bitnum=%d) with the following parameters:", zeus->device_id, devpath, baud, info->read_count, info->chips_bit_num);
+	applog(LOG_DEBUG, "[Speed] %iMHz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s]",
 		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000);
-
+	
 	zeus_close(fd);
 	return true;
 }
@@ -378,9 +369,8 @@ static bool zeus_detect_one(const char *devpath)
 		info->chip_clk = 200;
 	
 	if(info->chips_count > ZEUS_CHIPS_COUNT_MAX)
-	{
 		info->chips_count_max = zeus_update_num(info->chips_count);
-	}
+		
 	info->chips_bit_num = zeus_log_2(info->chips_count_max);
 	info->golden_speed_percore = (((info->chip_clk*2)/3)*1024)/8;
 
@@ -389,7 +379,7 @@ static bool zeus_detect_one(const char *devpath)
 	info->board_hash = info->golden_speed_percore*info->cores_perchip*info->chips_count;
 	
 	uint32_t read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
-	applog(LOG_INFO, "%s calculated ReadCount: %d", devpath, read_count);
+	applog(LOG_DEBUG, "%s calculated ReadCount: %d", devpath, read_count);
 	if(read_count < info->read_count)
 		info->read_count = read_count;
 	
@@ -530,7 +520,7 @@ if(diff < 1) diff = 1;
   uint32_t read_count = info->read_count;
 
   while(1){		
-    ret = zeus_gets(nonce_bin, fd, &tv_finish, thr, read_count,&elapsed_count);
+    ret = zeus_gets(nonce_bin, fd, &tv_finish, thr, read_count,info->read_size);
     if (ret == ZEUS_GETS_ERROR) {
       zeus_shutdown(thr);
       applog(LOG_ERR, "%s%i: Comms error", zeus->drv->name, zeus->device_id);
@@ -563,13 +553,14 @@ if(diff < 1) diff = 1;
       return estimate_hashes;
     }
 
+	/* Useless?????
     if(read_count>elapsed_count){
       read_count -= elapsed_count;
     }
     else {
       read_count=0;
     }
-
+*/
     memcpy((char *)&nonce, nonce_bin, sizeof(nonce_bin));
     //rev(nonce_bin,4);
 #if !defined (__BIG_ENDIAN__) && !defined(MIPSEB)
@@ -577,13 +568,11 @@ if(diff < 1) diff = 1;
 #endif
 
     curr_hw_errors = zeus->hw_errors;
-    
-    submit_nonce(thr, work, nonce);
-    
+    submit_nonce(thr, work, nonce);  
     was_hw_error = (curr_hw_errors < zeus->hw_errors);
  
     if (was_hw_error){			
-      zeus_flush_uart(fd);
+      //zeus_flush_uart(fd);
 	  applog(LOG_ERR, "HW Error of calculating nonce: %08x ", nonce);
       if (opt_debug&&1) {
 	applog(LOG_ERR, "ERR nonce:%08x ",nonce);
