@@ -345,7 +345,9 @@ static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, stru
 		applog(LOG_ERR, "Found %"PRIpreprv" at %s,  Init: baud=%d with the following parameters:", zeus->proc_repr, devpath, baud);
 		applog(LOG_ERR, "[Speed] %iMhz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s], readcount:%d, bitnum:%d",
 		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000, info->read_count, info->chips_bit_num);
-	}
+	}	
+	//PMA: FOR Testing should be LOG_INFO instead
+	applog(LOG_ERR, "Zeus %i on %s detected.", zeus->device_id, zeus->device_path);
 	zeus_close(fd);
 	return true;
 }
@@ -356,20 +358,31 @@ static bool zeus_detect_one(const char *devpath)
 	if (unlikely(!info))
 		quit(1, "Failed to malloc ZEUS_INFO");
 	
+	// Get values defined per --set-device, if not set use global variable
+	//PMA: Reduce Debug information with clean up
+	struct device_drv *drv = &zeus_drv;
+	drv_set_defaults(drv, zeus_set_device_funcs, info, devpath, detectone_meta_info.serial, 1);
+	if (!info->chip_clk)
+		info->chip_clk = opt_chip_clk;
+	if (!info->chips_count)
+		info->chips_count = opt_chips_count;
+	if (!info->read_count)
+		info->read_count = opt_read_count;
+
+	
+
 	info->check_num = 0x1234;	
 	info->baud = ZEUS_IO_SPEED;
 	info->read_size = ZEUS_READ_SIZE;
 	info->probe_read_count = 50;
 	info->cores_perchip = ZEUS_CHIP_CORES;
-	info->chips_count = opt_chips_count;
 	//max clock 381MHz, min clock 200MHz
-	if(opt_chip_clk>381)
-		info->chip_clk = 381;
-	else if(opt_chip_clk<200)
+	if(info->chip_clk > 382)
+		info->chip_clk = 382;
+	else if(info->chip_clk < 200)
 		info->chip_clk = 200;
-	else
-		info->chip_clk = opt_chip_clk;
-	if(info->chips_count>ZEUS_CHIPS_COUNT_MAX)
+	
+	if(info->chips_count > ZEUS_CHIPS_COUNT_MAX)
 	{
 		info->chips_count_max = zeus_update_num(info->chips_count);
 	}
@@ -380,15 +393,16 @@ static bool zeus_detect_one(const char *devpath)
 	info->chip_hash = info->golden_speed_percore*info->cores_perchip;
 	info->board_hash = info->golden_speed_percore*info->cores_perchip*info->chips_count;
 	
-	info->read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
-	info->read_count = info->read_count*0.76;
+	int read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
+	if(read_count < info->read_count)
+		info->read_count = read_count;//send a new work every 10 seconds
 	
-	if (!zeus_detect_custom(devpath, &zeus_drv, info))
+	if (!zeus_detect_custom(devpath, drv, info))
 	{
 		free(info);
 		return false;
 	}
-
+	
 	return true;
 }
 
@@ -497,7 +511,8 @@ if(diff < 1) diff = 1;
     free(ob_hex);
   }
 
-  int discard = read(fd, flush_buf, 400);
+  //int discard = read(fd, flush_buf, 400);
+  zeus_flush_uart(fd);
   ret = zeus_write(fd, ob_bin, 84); 
   if (ret) {
     zeus_shutdown(thr);
@@ -529,7 +544,7 @@ if(diff < 1) diff = 1;
 
 #ifndef WIN32
 //openwrt
-    zeus_flush_uart(fd);
+//    zeus_flush_uart(fd);
 #endif
 
     work->blk.nonce = 0xffffffff;
@@ -593,6 +608,44 @@ if(diff < 1) diff = 1;
 
   }
 }
+
+
+// PMA: test for support of --set-device
+static const char *zeus_set_chip_clk(struct cgpu_info * const device, const char * const option, const char * const setting, char * const replybuf, enum bfg_set_device_replytype * const success)
+{
+	struct ZEUS_INFO * const info = device->device_data;
+
+	info->chip_clk = atoi(setting);
+
+	return NULL;
+}
+
+static const char *zeus_set_chips_count(struct cgpu_info * const device, const char * const option, const char * const setting, char * const replybuf, enum bfg_set_device_replytype * const success)
+{
+	struct ZEUS_INFO * const info = device->device_data;
+
+	info->chips_count = atoi(setting);
+
+	return NULL;
+}
+
+static const char *zeus_set_read_count(struct cgpu_info * const device, const char * const option, const char * const setting, char * const replybuf, enum bfg_set_device_replytype * const success)
+{
+	struct ZEUS_INFO * const info = device->device_data;
+
+	info->read_count = atoi(setting);
+
+	return NULL;
+}
+
+
+static const struct bfg_set_device_definition zeus_set_device_funcs[] = {
+	{ "clock", zeus_set_chip_clk, NULL },
+	{ "chips", zeus_set_chips_count, NULL },
+	{ "read", zeus_set_read_count, NULL },
+	{ NULL },
+};
+
 
 
 static struct api_data *zeus_api_stats(struct cgpu_info *cgpu)

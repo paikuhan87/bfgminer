@@ -1,5 +1,5 @@
  --------------------------------------------
-| Custom Build bfgminer 4.2.1 for ZeusMiner |
+| Custom Build bfgminer 4.2.2 for ZeusMiner |
  --------------------------------------------
 BASED ON:
 > BFG Miner: https://github.com/luke-jr/bfgminer
@@ -54,15 +54,15 @@ If you don't have access to /dev/tty* devices as a user on Linux:
 When mining on linux, but not using 'sudo' and not logged into 'root' you
 may get a USB priviledge error (-3), so you may also need to do the following:
 1) SSH/Log into your OS
-2) CD into the cgminer directory
-3) Copy the file "01-cgminer.rules" to udev:
-cp 01-cgminer.rules  /etc/udev/rules.d/01-cgminer.rules
+2) CD into the bfgminer directory
+3) Copy the file "70-bfgminer.rules" to udev:
+cp 70-bfgminer.rules /etc/udev/rules.d/70-bfgminer.rules
 4) Perform the following command:
 lsusb
 5) You get something like this:
 Bus 001 Device 005: ID 10c4:ea60 Cygnal Integrated Products, Inc. CP210x UART Bridge / myAVR mySmartUSB light
 5.1) The HEX string after ID is the required Vendor ID and Product ID, delimitered by a colon
-6) Edit the file "01-cgminer.rules" with an editor of your choice and add:
+6) Edit the file "70-bfgminer.rules" with an editor of your choice and add:
 ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SUBSYSTEMS=="usb", ACTION=="add", MODE="0666", GROUP="plugdev"
 6.1) Change the idVendor and idProduct according to the HEX string got from point 4).
 6.2) Save changes and leave the file

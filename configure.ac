@@ -4,6 +4,7 @@ dnl * Copyright 2010-2011 Jeff Garzik
 dnl * Copyright 2012 Xiangfu
 dnl * Copyright 2011 Rusty Russell
 dnl * Copyright 2011 Mark Crichton
+dnl * Copyright 2014 Darkwinde
 dnl *
 dnl * This program is free software; you can redistribute it and/or modify it
 dnl * under the terms of the GNU General Public License as published by the Free
@@ -14,9 +15,10 @@ dnl * any later version.  See COPYING for more details.
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [4])
 m4_define([v_min], [2])
-m4_define([v_mic], [1])
+m4_define([v_mic], [2])
+m4_define([v_rev], [ZeusMiner])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
-m4_define([v_ver], [v_maj.v_min.v_mic])
+m4_ifdef([v_rev], [m4_define([v_ver], [v_maj.v_min.v_mic-v_rev])], [m4_define([v_ver], [v_maj.v_min.v_mic])])
 m4_define([lt_rev], m4_eval(v_maj + v_min))
 m4_define([lt_cur], v_mic)
 m4_define([lt_age], v_min)
@@ -48,6 +50,7 @@ m4_ifdef([v_rel], , [m4_define([v_rel], [])])
 AC_DEFINE_UNQUOTED(CGMINER_MAJOR_VERSION, [v_maj], [Major version])
 AC_DEFINE_UNQUOTED(CGMINER_MINOR_VERSION, [v_min], [Minor version])
 AC_DEFINE_UNQUOTED(CGMINER_MINOR_SUBVERSION, [v_mic], [Micro version])
+AC_DEFINE_UNQUOTED(CGMINER_REVISON, [v_rev], [Revison])
 version_info="lt_rev:lt_cur:lt_age"
 release_info="v_rel"
 AC_SUBST(version_info)

@@ -54,6 +54,7 @@ extern bool opt_debug;
 extern bool opt_check_golden;
 extern int opt_chips_count;
 extern int opt_chip_clk;
+extern int opt_read_count;
 /**
  * Internal variables
  **/
@@ -123,6 +124,8 @@ struct ZEUS_INFO {
 
 
 BFG_REGISTER_DRIVER(zeus_drv);
+
+static const struct bfg_set_device_definition zeus_set_device_funcs[];
 
 #define zeus_open2(devpath, baud, purge)  serial_open(devpath, baud, ZEUS_READ_FAULT_DECISECONDS, purge)
 #define zeus_open(devpath, baud)  zeus_open2(devpath, baud, false)

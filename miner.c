@@ -221,9 +221,12 @@ bool have_libusb;
 #endif
 
 //ZeusMiner Default Definition
+#ifdef USE_ZEUS
 bool opt_check_golden = false;
 int opt_chips_count = 6;
 int opt_chip_clk = 328;
+int opt_read_count = 300;
+#endif
 
 static bool opt_submit_stale = true;
 static float opt_shares;
@@ -2449,7 +2452,10 @@ static struct opt_table opt_config_table[] = {
 		 "ZEUS: Chips count on _one_ port (Default: 6)"),
 	OPT_WITH_ARG("--zeus-clk",
 		 set_int_1_to_65535, opt_show_intval, &opt_chip_clk,
-		 "ZEUS: Chip clock in Mhz (Default: 328)"),		 
+		 "ZEUS: Chip clock in Mhz (Default: 328)"),	
+	OPT_WITH_ARG("--zeus-rc",
+		 set_int_1_to_65535, opt_show_intval, &opt_read_count,
+		 "readcount (seconds*10) timeout to start a new work"),		 
 #endif
 	OPT_ENDTABLE
 };

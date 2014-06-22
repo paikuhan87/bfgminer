@@ -9,6 +9,13 @@ Chips Clock (FROM --ltc-clk TO --zeus-clk) > Default "328"
 Check Golden (FROM --nocheck-golden TO --zeus-cg) > Default "false" and Check for Golden Speed currently deactivated
 Debug (FROM --ltc-debug TO --debug) > Related output changed to default debug information layer
 No Check Scrypt (--nocheck-scrypt) > removed as deprecated
+- Zeus: Introduction of new configurable parameter Read Count (--zeus-rc) > Default 300
+- Zeus: Introduction of device specific parameter (--set-device / --set) > clock / chips / read
+It is recommended to use the device path variant of Example 02 / 03. 
+The global parameters (--zeus-cc / --zeus-clk / --zeus-rc) still work and used if no individual device parameter are set!!!!
+Example 01: --set-device zeus:clock=340 --set-device zeus:chips=96 --set-device zeus:read=200
+Example 02: --set zeus@/dev/ttyUSB0:clock=340 --set zeus@/dev/ttyUSB0:chips=96 --set zeus@/dev/ttyUSB0:read=200
+Example 03: --set zeus@\\.\COM1:clock=340 --set zeus@\\.\COM1:chips=96 --set zeus@\\.\COM1:read=200
 
 
 >>> Any issues? Report to Darkwinde <Darkwinde@web.de> @ LiteCoinTalk.org
