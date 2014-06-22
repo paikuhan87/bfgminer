@@ -339,15 +339,10 @@ static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, stru
 	add_cgpu(zeus);	
 	zeus->device_data = info;
 	
-	applog(LOG_INFO, "Found %"PRIpreprv" at %s", zeus->proc_repr, devpath);
-	if(opt_debug)
-	{
-		applog(LOG_ERR, "Found %"PRIpreprv" at %s,  Init: baud=%d with the following parameters:", zeus->proc_repr, devpath, baud);
-		applog(LOG_ERR, "[Speed] %iMhz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s], readcount:%d, bitnum:%d",
-		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000, info->read_count, info->chips_bit_num);
-	}	
-	//PMA: FOR Testing should be LOG_INFO instead
-	applog(LOG_ERR, "Zeus %i on %s detected.", zeus->device_id, zeus->device_path);
+	applog(LOG_INFO, "Zeus %i at %s (Init: baud=%d, readcount=%d, bitnum=%d)with the following parameters:", zeus->device_id, devpath, baud, info->read_count, info->chips_bit_num);
+	applog(LOG_INFO, "[Speed] %iMHz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s]",
+		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000);
+
 	zeus_close(fd);
 	return true;
 }
@@ -376,7 +371,7 @@ static bool zeus_detect_one(const char *devpath)
 	info->read_size = ZEUS_READ_SIZE;
 	info->probe_read_count = 50;
 	info->cores_perchip = ZEUS_CHIP_CORES;
-	//max clock 381MHz, min clock 200MHz
+	//max clock 382MHz, min clock 200MHz
 	if(info->chip_clk > 382)
 		info->chip_clk = 382;
 	else if(info->chip_clk < 200)
@@ -387,15 +382,16 @@ static bool zeus_detect_one(const char *devpath)
 		info->chips_count_max = zeus_update_num(info->chips_count);
 	}
 	info->chips_bit_num = zeus_log_2(info->chips_count_max);
-	info->golden_speed_percore = (((info->chip_clk*2)/3)*1024)/8*1.1;
+	info->golden_speed_percore = (((info->chip_clk*2)/3)*1024)/8;
 
 	info->core_hash = info->golden_speed_percore;
 	info->chip_hash = info->golden_speed_percore*info->cores_perchip;
 	info->board_hash = info->golden_speed_percore*info->cores_perchip*info->chips_count;
 	
-	int read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
+	uint32_t read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
+	applog(LOG_INFO, "%s calculated ReadCount: %d", devpath, read_count);
 	if(read_count < info->read_count)
-		info->read_count = read_count;//send a new work every 10 seconds
+		info->read_count = read_count;
 	
 	if (!zeus_detect_custom(devpath, drv, info))
 	{
