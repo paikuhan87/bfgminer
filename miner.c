@@ -128,11 +128,8 @@ static bool want_longpoll = true;
 static bool want_gbt = true;
 static bool want_getwork = true;
 #if BLKMAKER_VERSION > 1
-struct _cbscript_t {
-	char *data;
-	size_t sz;
-};
-static struct _cbscript_t opt_coinbase_script;
+static bool have_at_least_one_getcbaddr;
+static bytes_t opt_coinbase_script = BYTES_INIT;
 static uint32_t template_nonce;
 #endif
 #if BLKMAKER_VERSION > 0
@@ -216,6 +213,7 @@ bool use_curses = true;
 #else
 bool use_curses;
 #endif
+int last_logstatusline_len;
 #ifdef HAVE_LIBUSB
 bool have_libusb;
 #endif
@@ -1042,6 +1040,8 @@ void adjust_quota_gcd(void)
 	applog(LOG_DEBUG, "Global quota greatest common denominator set to %lu", gcd);
 }
 
+static void enable_pool(struct pool *);
+
 /* Return value is ignored if not called from add_pool_details */
 struct pool *add_pool(void)
 {
@@ -1061,10 +1061,13 @@ struct pool *add_pool(void)
 	timer_unset(&pool->swork.tv_transparency);
 	pool->swork.pool = pool;
 
+	pool->idle = true;
 	/* Make sure the pool doesn't think we've been idle since time 0 */
 	pool->tv_idle.tv_sec = ~0UL;
 	
 	cgtime(&pool->cgminer_stats.start_tv);
+	pool->cgminer_stats.getwork_wait_min.tv_sec = MIN_SEC_UNSET;
+	pool->cgminer_pool_stats.getwork_wait_min.tv_sec = MIN_SEC_UNSET;
 
 	pool->rpc_proxy = NULL;
 	pool->quota = 1;
@@ -1072,19 +1075,29 @@ struct pool *add_pool(void)
 	pool->sock = INVSOCK;
 	pool->lp_socket = CURL_SOCKET_BAD;
 
+	pools = realloc(pools, sizeof(struct pool *) * (total_pools + 2));
+	pools[total_pools++] = pool;
+	
 	if (opt_benchmark)
 	{
-		// Don't add to pools array, but immediately remove it
+		// Immediately remove it
 		remove_pool(pool);
 		return pool;
 	}
 	
-	pools = realloc(pools, sizeof(struct pool *) * (total_pools + 2));
-	pools[total_pools++] = pool;
-	
 	adjust_quota_gcd();
+	
+	enable_pool(pool);
 
 	return pool;
+}
+
+static
+void pool_set_uri(struct pool * const pool, char * const uri)
+{
+	pool->rpc_url = uri;
+	if (uri_get_param_bool(uri, "getcbaddr", false))
+		have_at_least_one_getcbaddr = true;
 }
 
 /* Pool variant of test and set */
@@ -1197,7 +1210,8 @@ char *set_strdup(const char *arg, char **p)
 }
 
 #if BLKMAKER_VERSION > 1
-static char *set_b58addr(const char *arg, struct _cbscript_t *p)
+static
+char *set_b58addr(const char * const arg, bytes_t * const b)
 {
 	size_t scriptsz = blkmk_address_to_script(NULL, 0, arg);
 	if (!scriptsz)
@@ -1207,8 +1221,7 @@ static char *set_b58addr(const char *arg, struct _cbscript_t *p)
 		free(script);
 		return "Failed to convert address to script";
 	}
-	p->data = script;
-	p->sz = scriptsz;
+	bytes_assimilate_raw(b, script, scriptsz, scriptsz);
 	return NULL;
 }
 #endif
@@ -1452,7 +1465,7 @@ bool detect_stratum(struct pool *pool, char *url)
 		return false;
 
 	if (!strncasecmp(url, "stratum+tcp://", 14)) {
-		pool->rpc_url = strdup(url);
+		pool_set_uri(pool, strdup(url));
 		pool->has_stratum = true;
 		pool->stratum_url = pool->sockaddr_url;
 		return true;
@@ -1484,7 +1497,7 @@ static void setup_url(struct pool *pool, char *arg)
 		if (!httpinput)
 			quit(1, "Failed to malloc httpinput");
 		sprintf(httpinput, "http://%s", arg);
-		pool->rpc_url = httpinput;
+		pool_set_uri(pool, httpinput);
 	}
 }
 
@@ -1568,12 +1581,12 @@ static char *set_userpass(const char *arg)
 	pool = pools[total_users - 1];
 	updup = strdup(arg);
 	opt_set_charp(arg, &pool->rpc_userpass);
-	pool->rpc_user = strtok(updup, ":");
-	if (!pool->rpc_user)
-		return "Failed to find : delimited user info";
-	pool->rpc_pass = strtok(NULL, ":");
-	if (!pool->rpc_pass)
-		pool->rpc_pass = "";
+	pool->rpc_user = updup;
+	pool->rpc_pass = strchr(updup, ':');
+	if (pool->rpc_pass)
+		pool->rpc_pass++[0] = '\0';
+	else
+		pool->rpc_pass = &updup[strlen(updup)];
 
 	return NULL;
 }
@@ -2856,6 +2869,72 @@ void work_set_simple_ntime_roll_limit(struct work * const work, const int ntime_
 	set_simple_ntime_roll_limit(&work->ntime_roll_limits, upk_u32be(work->data, 0x44), ntime_roll);
 }
 
+static
+void refresh_bitcoind_address(const bool fresh)
+{
+	if (!have_at_least_one_getcbaddr)
+		return;
+	
+	char getcbaddr_req[60];
+	CURL *curl = NULL;
+	json_t *json, *j2;
+	const char *s, *s2;
+	bytes_t newscript = BYTES_INIT;
+	
+	snprintf(getcbaddr_req, sizeof(getcbaddr_req), "{\"method\":\"get%saddress\",\"id\":0,\"params\":[\"BFGMiner\"]}", fresh ? "new" : "account");
+	
+	for (int i = 0; i < total_pools; ++i)
+	{
+		struct pool * const pool = pools[i];
+		if (!uri_get_param_bool(pool->rpc_url, "getcbaddr", false))
+			continue;
+		
+		applog(LOG_DEBUG, "Refreshing coinbase address from pool %d", pool->pool_no);
+		if (!curl)
+		{
+			curl = curl_easy_init();
+			if (unlikely(!curl))
+			{
+				applogfail(LOG_ERR, "curl_easy_init");
+				break;
+			}
+		}
+		json = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass, getcbaddr_req, false, false, NULL, pool, true);
+		j2 = json_object_get(json, "error");
+		if (unlikely(!json_is_null(j2)))
+		{
+			char *estr = NULL;
+			applog(LOG_WARNING, "Error %cetting coinbase address from pool %d: %s", 'g', pool->pool_no, json_string_value(j2) ?: (estr = json_dumps_ANY(j2, JSON_ENSURE_ASCII | JSON_SORT_KEYS)));
+			free(estr);
+			continue;
+		}
+		s = bfg_json_obj_string(json, "result", NULL);
+		if (unlikely(!s))
+		{
+			applog(LOG_WARNING, "Error %cetting coinbase address from pool %d: %s", 'g', pool->pool_no, "(return value was not a String)");
+			continue;
+		}
+		s2 = set_b58addr(s, &newscript);
+		if (unlikely(s2))
+		{
+			applog(LOG_WARNING, "Error %cetting coinbase address from pool %d: %s", 's', pool->pool_no, s2);
+			continue;
+		}
+		if (bytes_eq(&newscript, &opt_coinbase_script))
+		{
+			applog(LOG_DEBUG, "Pool %d returned coinbase address already in use (%s)", pool->pool_no, s2);
+			break;
+		}
+		bytes_assimilate(&opt_coinbase_script, &newscript);
+		applog(LOG_NOTICE, "Now using coinbase address %s, provided by pool %d", s, pool->pool_no);
+		break;
+	}
+	
+	bytes_free(&newscript);
+	if (curl)
+		curl_easy_cleanup(curl);
+}
+
 static double target_diff(const unsigned char *);
 
 #define GBT_XNONCESZ (sizeof(uint32_t))
@@ -2891,14 +2970,20 @@ static bool work_decode(struct pool *pool, struct work *work, json_t *val)
 		}
 		work->rolltime = blkmk_time_left(tmpl, tv_now.tv_sec);
 #if BLKMAKER_VERSION > 1
-		if (opt_coinbase_script.sz)
+		if ((!tmpl->cbtxn) && !bytes_len(&opt_coinbase_script))
+		{
+			// We are about to fail here because we lack a coinbase transaction
+			// Try to get an address from bitcoind to use to avoid this
+			refresh_bitcoind_address(false);
+		}
+		if (bytes_len(&opt_coinbase_script))
 		{
 			bool newcb;
 #if BLKMAKER_VERSION > 2
-			blkmk_init_generation2(tmpl, opt_coinbase_script.data, opt_coinbase_script.sz, &newcb);
+			blkmk_init_generation2(tmpl, bytes_buf(&opt_coinbase_script), bytes_len(&opt_coinbase_script), &newcb);
 #else
 			newcb = !tmpl->cbtxn;
-			blkmk_init_generation(tmpl, opt_coinbase_script.data, opt_coinbase_script.sz);
+			blkmk_init_generation(tmpl, bytes_buf(&opt_coinbase_script), bytes_len(&opt_coinbase_script));
 #endif
 			if (newcb)
 			{
@@ -3770,7 +3855,8 @@ static void text_print_status(int thr_id)
 	cgpu = get_thr_cgpu(thr_id);
 	if (cgpu) {
 		get_statline(logline, sizeof(logline), cgpu);
-		printf("%s\n", logline);
+		printf("\n%s\r", logline);
+		fflush(stdout);
 	}
 }
 
@@ -4313,8 +4399,11 @@ void logwin_update(void)
 static void enable_pool(struct pool *pool)
 {
 	if (pool->enabled != POOL_ENABLED) {
+		mutex_lock(&lp_lock);
 		enabled_pools++;
 		pool->enabled = POOL_ENABLED;
+		pthread_cond_broadcast(&lp_cond);
+		mutex_unlock(&lp_lock);
 	}
 }
 
@@ -4898,6 +4987,7 @@ void setup_benchmark_pool()
 	
 	pool->rpc_url = malloc(255);
 	strcpy(pool->rpc_url, "Benchmark");
+	pool_set_uri(pool, pool->rpc_url);
 	pool->rpc_user = pool->rpc_url;
 	pool->rpc_pass = pool->rpc_url;
 	enable_pool(pool);
@@ -5038,7 +5128,7 @@ static char *prepare_rpc_req2(struct work *work, enum pool_protocol proto, const
 				goto gbtfail;
 			caps |= GBT_LONGPOLL;
 #if BLKMAKER_VERSION > 1
-			if (opt_coinbase_script.sz)
+			if (bytes_len(&opt_coinbase_script) || have_at_least_one_getcbaddr)
 				caps |= GBT_CBVALUE;
 #endif
 			json_t *req = blktmpl_request_jansson(caps, lpid);
@@ -5570,14 +5660,19 @@ out_unlock:
 
 static void pool_died(struct pool *pool)
 {
+	mutex_lock(&lp_lock);
 	if (!pool_tset(pool, &pool->idle)) {
 		cgtime(&pool->tv_idle);
+		pthread_cond_broadcast(&lp_cond);
+		mutex_unlock(&lp_lock);
 		if (pool == current_pool()) {
 			applog(LOG_WARNING, "Pool %d %s not responding!", pool->pool_no, pool->rpc_url);
 			switch_pools(NULL);
 		} else
 			applog(LOG_INFO, "Pool %d %s failed to return work", pool->pool_no, pool->rpc_url);
 	}
+	else
+		mutex_unlock(&lp_lock);
 }
 
 bool stale_work(struct work *work, bool share)
@@ -5725,6 +5820,7 @@ void work_check_for_block(struct work * const work)
 		found_blocks++;
 		work->mandatory = true;
 		applog(LOG_NOTICE, "Found block for pool %d!", work->pool->pool_no);
+		refresh_bitcoind_address(true);
 	}
 }
 
@@ -6300,6 +6396,9 @@ void switch_pools(struct pool *selected)
 
 	currentpool = pools[pool_no];
 	pool = currentpool;
+	mutex_lock(&lp_lock);
+	pthread_cond_broadcast(&lp_cond);
+	mutex_unlock(&lp_lock);
 	cg_wunlock(&control_lock);
 
 	/* Set the lagging flag to avoid pool not providing work fast enough
@@ -7223,7 +7322,10 @@ retry:
 				goto retry;
 			}
 		}
+		mutex_lock(&lp_lock);
 		pool_strategy = selected;
+		pthread_cond_broadcast(&lp_cond);
+		mutex_unlock(&lp_lock);
 		switch_pools(NULL);
 		goto updated;
 	} else if (!strncasecmp(&input, "i", 1)) {
@@ -7951,7 +8053,7 @@ static void hashmeter(int thr_id, struct timeval *diff,
 
 				get_statline(logline, sizeof(logline), cgpu);
 				if (!curses_active) {
-					printf("%s          \r", logline);
+					printf("\n%s\r", logline);
 					fflush(stdout);
 				} else
 					applog(LOG_INFO, "%s", logline);
@@ -8099,7 +8201,23 @@ out_unlock:
 
 	if (showlog) {
 		if (!curses_active) {
-			printf("%s          \r", logstatusline);
+			if (want_per_device_stats)
+				printf("\n%s\r", logstatusline);
+			else
+			{
+				const int logstatusline_len = strlen(logstatusline);
+				int padding;
+				if (last_logstatusline_len > logstatusline_len)
+					padding = (last_logstatusline_len - logstatusline_len);
+				else
+				{
+					padding = 0;
+					if (last_logstatusline_len == -1)
+						puts("");
+				}
+				printf("%s%*s\r", logstatusline, padding, "");
+				last_logstatusline_len = logstatusline_len;
+			}
 			fflush(stdout);
 		} else
 			applog(LOG_INFO, "%s", logstatusline);
@@ -8741,7 +8859,7 @@ tryagain:
 
 		applog(LOG_NOTICE, "Switching pool %d %s to %s", pool->pool_no, pool->rpc_url, pool->stratum_url);
 		if (!pool->rpc_url)
-			pool->rpc_url = strdup(pool->stratum_url);
+			pool_set_uri(pool, strdup(pool->stratum_url));
 		pool->has_stratum = true;
 
 		}
@@ -9895,13 +10013,13 @@ struct pool *_select_longpoll_pool(struct pool *cp, bool(*func)(struct pool *))
  */
 static void wait_lpcurrent(struct pool *pool)
 {
+	mutex_lock(&lp_lock);
 	while (!cnx_needed(pool))
 	{
 		pool->lp_active = false;
-		mutex_lock(&lp_lock);
 		pthread_cond_wait(&lp_cond, &lp_lock);
-		mutex_unlock(&lp_lock);
 	}
+	mutex_unlock(&lp_lock);
 }
 
 static curl_socket_t save_curl_socket(void *vpool, __maybe_unused curlsocktype purpose, struct curl_sockaddr *addr) {
@@ -10616,6 +10734,14 @@ void print_summary(void)
 
 	if (opt_quit_summary != BQS_NONE)
 	{
+		if (opt_quit_summary == BQS_DEFAULT)
+		{
+			if (total_devices < 25)
+				opt_quit_summary = BQS_PROCS;
+			else
+				opt_quit_summary = BQS_DEVS;
+		}
+		
 		if (opt_quit_summary == BQS_DETAILED)
 			include_serial_in_statline = true;
 		applog(LOG_WARNING, "Summary of per device statistics:\n");
@@ -10761,7 +10887,7 @@ bool add_pool_details(struct pool *pool, bool live, char *url, char *user, char 
 {
 	size_t siz;
 
-	pool->rpc_url = url;
+	pool_set_uri(pool, url);
 	pool->rpc_user = user;
 	pool->rpc_pass = pass;
 	siz = strlen(pool->rpc_user) + strlen(pool->rpc_pass) + 2;
@@ -11450,10 +11576,12 @@ void *probe_device_thread(void *p)
 		if (strcasecmp(&colon[1], "all"))
 			continue;
 		const size_t dnamelen = (colon - dname);
+		const struct device_drv * const drv = _probe_device_find_drv(dname, dnamelen);
+		if (!(drv && drv->lowl_probe && drv_algo_check(drv)))
+			continue;
 		LL_FOREACH2(infolist, info, same_devid_next)
 		{
-			const struct device_drv * const drv = _probe_device_find_drv(dname, dnamelen);
-			if (!(drv && drv->lowl_probe && drv_algo_check(drv)))
+			if (info->lowl->exclude_from_all)
 				continue;
 			if (_probe_device_do_probe(drv, info, NULL))
 				return NULL;
@@ -12179,14 +12307,6 @@ int main(int argc, char *argv[])
 			applog(LOG_WARNING, "Waiting for devices");
 	}
 	
-	if (opt_quit_summary == BQS_DEFAULT)
-	{
-		if (total_devices < 25)
-			opt_quit_summary = BQS_PROCS;
-		else
-			opt_quit_summary = BQS_DEVS;
-	}
-
 #ifdef HAVE_CURSES
 	switch_logsize();
 #endif
@@ -12202,9 +12322,6 @@ int main(int argc, char *argv[])
 	for (i = 0; i < total_pools; i++) {
 		struct pool *pool = pools[i];
 		size_t siz;
-
-		pool->cgminer_stats.getwork_wait_min.tv_sec = MIN_SEC_UNSET;
-		pool->cgminer_pool_stats.getwork_wait_min.tv_sec = MIN_SEC_UNSET;
 
 		if (!pool->rpc_url)
 			quit(1, "No URI supplied for pool %u", i);
@@ -12254,13 +12371,6 @@ int main(int argc, char *argv[])
 
 	if (opt_benchmark)
 		goto begin_bench;
-
-	for (i = 0; i < total_pools; i++) {
-		struct pool *pool  = pools[i];
-
-		enable_pool(pool);
-		pool->idle = true;
-	}
 
 	applog(LOG_NOTICE, "Probing for an alive pool");
 	do {
