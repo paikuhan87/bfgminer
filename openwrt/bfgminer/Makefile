@@ -11,7 +11,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=bfgminer
 PKG_TITLE:=BFGMiner
-PKG_VERSION:=4.0.0
+PKG_VERSION:=4.3.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).txz
@@ -62,6 +62,10 @@ config PACKAGE_$(PKG_NAME)_libusb
 	bool "Build with libusb support (X6500 & ZTEX)"
 	depends on PACKAGE_$(PKG_NAME)
 	default y
+config PACKAGE_$(PKG_NAME)_scrypt
+	bool "Build with scrypt algorithm support"
+	depends on PACKAGE_$(PKG_NAME)
+	default y
 endef
 
 ifndef CONFIG_PACKAGE_$(PKG_NAME)_curses
@@ -83,7 +87,11 @@ CONFIGURE_ARGS += --with-libmicrohttpd
 endif
 
 ifndef CONFIG_PACKAGE_$(PKG_NAME)_libusb
-CONFIGURE_ARGS += --disable-x6500 --disable-ztex
+CONFIGURE_ARGS += --without-libusb
+endif
+
+ifdef CONFIG_PACKAGE_$(PKG_NAME)_scrypt
+CONFIGURE_ARGS += --enable-scrypt
 endif
 
 TARGET_CFLAGS += -std=gnu99

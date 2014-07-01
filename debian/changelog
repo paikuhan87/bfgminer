@@ -1,9 +1,26 @@
-bfgminer (4.0.0) custom build
- * zeus: New driver, supporting Zeus miner scrypt only ASIC mining.
- 
- -- Darkwinde <Darkwinde@web.de>, fbatogo <> 
+bfgminer (4.3.0-0precise1) precise; urgency=low
 
- 
+  * URI parameter #getcbaddr to request coinbase address from bitcoind or compatible servers for solo mining.
+  * When running on systems with a configured Bitcoin Core server, it is automatically configured as a final failover and used for local block submission (GBT pools only) to reduce the risk of a stale block.
+  * bitforce: Implement some last-minute Monarch interface changes.
+  * zeusminer: New driver for these scrypt ASIC devices.
+
+ -- Luke Dashjr <luke+bfgminer@dashjr.org>  Mon, 30 Jun 2014 14:55:06 -0000
+
+bfgminer (4.2.0-0precise1) precise; urgency=low
+
+  * rockminer: New driver for ROCKMINER R-BOX.
+
+ -- Luke Dashjr <luke+bfgminer@dashjr.org>  Wed, 11 Jun 2014 03:03:50 -0000
+
+bfgminer (4.1.0-0precise1) precise; urgency=low
+
+  * Stratum: Fix recovery of dead pools.
+  * gridseed: 80-chip G-Blade support.
+  * Stratum: Support for authenticated TLS with the CA model, using #tlsca URI parameter.
+
+ -- Luke Dashjr <luke+bfgminer@dashjr.org>  Fri, 06 Jun 2014 02:35:20 -0000
+
 bfgminer (4.0.0-0precise1) precise; urgency=low
 
   * Various options (specifically, --temp-cutoff, --temp-target, and the various --<driver>-options) have been migrated to the --set-device interface.
