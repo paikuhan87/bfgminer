@@ -708,14 +708,14 @@ static inline void swap32yes(void*out, const void*in, size_t sz) {
 // end
 
 #ifdef WORDS_BIGENDIAN
-#  define swap32tobe(out, in, sz)  ((out == in) ? (void)0 : (void)memmove(out, in, sz))
+#  define swap32tobe(out, in, sz)  ((out == in) ? (void)0 : (void)memmove(out, in, (sz)*4))
 #  define LOCAL_swap32be(type, var, sz)  ;
 #  define swap32tole(out, in, sz)  swap32yes(out, in, sz)
 #  define LOCAL_swap32le(type, var, sz)  LOCAL_swap32(type, var, sz)
 #else
 #  define swap32tobe(out, in, sz)  swap32yes(out, in, sz)
 #  define LOCAL_swap32be(type, var, sz)  LOCAL_swap32(type, var, sz)
-#  define swap32tole(out, in, sz)  ((out == in) ? (void)0 : (void)memmove(out, in, sz))
+#  define swap32tole(out, in, sz)  ((out == in) ? (void)0 : (void)memmove(out, in, (sz)*4))
 #  define LOCAL_swap32le(type, var, sz)  ;
 #endif
 
@@ -743,6 +743,18 @@ void bswap_96p(void * const dest_p, const void * const src_p)
 	dest[0] = bswap_32(src[2]);
 	dest[1] = bswap_32(src[1]);
 	dest[2] = bswap_32(src[0]);
+}
+
+static inline
+void bswap_32mult(void * const dest_p, const void * const src_p, const size_t sz)
+{
+	const uint32_t *s = src_p;
+	const uint32_t *s_end = &s[sz];
+	uint32_t *d = dest_p;
+	d = &d[sz - 1];
+	
+	for ( ; s < s_end; ++s, --d)
+		*d = bswap_32(*s);
 }
 
 #define flip32(dest_p, src_p) swap32yes(dest_p, src_p, 32 / 4)
@@ -1249,6 +1261,7 @@ struct pool {
 	bool probed;
 	int force_rollntime;
 	enum pool_enable enabled;
+	bool failover_only;  // NOTE: Ignored by failover and loadbalance strategies (use priority and quota respectively)
 	bool submit_old;
 	bool removed;
 	bool lp_started;
@@ -1342,6 +1355,9 @@ struct pool {
 #define GETWORK_MODE_STRATUM 'S'
 #define GETWORK_MODE_GBT 'G'
 
+typedef unsigned work_device_id_t;
+#define PRIwdi "04x"
+
 struct work {
 	unsigned char	data[128];
 	unsigned char	midstate[32];
@@ -1378,7 +1394,7 @@ struct work {
 
 	unsigned char	work_restart_id;
 	int		id;
-	int		device_id;
+	work_device_id_t device_id;
 	UT_hash_handle hh;
 	
 	// Please don't use this if it's at all possible, I'd like to get rid of it eventually.

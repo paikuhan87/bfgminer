@@ -122,6 +122,12 @@ struct ZEUS_INFO {
 	bool nonce_littleendian;
 };
 
+struct ZEUS_STATE {
+	struct work *last1_work;
+	struct work *last2_work;
+	struct work *last3_work;
+};
+
 
 BFG_REGISTER_DRIVER(zeus_drv);
 

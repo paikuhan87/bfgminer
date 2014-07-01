@@ -4,6 +4,7 @@ dnl * Copyright 2010-2011 Jeff Garzik
 dnl * Copyright 2012 Xiangfu
 dnl * Copyright 2011 Rusty Russell
 dnl * Copyright 2011 Mark Crichton
+dnl * Copyright 2013-2014 Nate Woolls
 dnl * Copyright 2014 Darkwinde
 dnl *
 dnl * This program is free software; you can redistribute it and/or modify it
@@ -14,8 +15,8 @@ dnl * any later version.  See COPYING for more details.
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [4])
-m4_define([v_min], [2])
-m4_define([v_mic], [2])
+m4_define([v_min], [3])
+m4_define([v_mic], [1])
 m4_define([v_rev], [ZeusMiner])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_ifdef([v_rev], [m4_define([v_ver], [v_maj.v_min.v_mic-v_rev])], [m4_define([v_ver], [v_maj.v_min.v_mic])])
@@ -500,6 +501,27 @@ if test "x$dualminer" = "xyes"; then
 fi
 AM_CONDITIONAL([USE_DUALMINER], [test x$dualminer = xyes])
 
+driverlist="$driverlist zeusminer"
+AC_ARG_ENABLE([zeusminer],
+	[AC_HELP_STRING([--disable-zeusminer],[Compile support for ZeusMiner (default enabled with scrypt)])],
+	[zeusminer=$enableval],
+	[zeusminer=$ddauto])
+if test "x$zeusminer" = "xno"; then
+	true
+elif test "x$icarus$scrypt" = "xyesyes"; then
+	zeusminer=yes
+elif test "x$zeusminer" = "xauto"; then
+	zeusminer=no
+elif test "x$scrypt" = "xno"; then
+	AC_MSG_ERROR([You explicitly enabled ZeusMiner, but did not enable scrypt])
+elif test "x$icarus" = "xno"; then
+	AC_MSG_ERROR([You explicitly disabled Icarus and explicitly enabled ZeusMiner])
+fi
+if test "x$zeusminer" = "xyes"; then
+	AC_DEFINE([USE_ZEUSMINER], [1], [Defined to 1 if ZeusMiner support is wanted])
+	has_asic=yes
+fi
+AM_CONDITIONAL([USE_ZEUSMINER], [test x$zeusminer = xyes])
 driverlist="$driverlist gridseed"
 AC_ARG_ENABLE([gridseed],
 	[AC_HELP_STRING([--disable-gridseed],[Compile support for GridSeed (default enabled with scrypt)])],

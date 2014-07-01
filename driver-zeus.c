@@ -81,57 +81,66 @@ static void rev(unsigned char *s, size_t l)
   }
 }
 
-static int zeus_gets(unsigned char *buf, int fd, struct timeval *tv_finish, struct thr_info *thr, int read_count, int read_size)
+static int zeus_gets(unsigned char *buf, int fd, struct timeval *tv_finish, struct thr_info *thr, int read_count,uint32_t *elapsed_count)
 {
-	ssize_t ret = 0;
-	int rc = 0;
-	int read_amount = read_size;
-	bool first = true;  
-		
-	while (true)
+  ssize_t ret = 0;
+  int rc = 0;
+  int read_amount = ZEUS_READ_SIZE;
+  bool first = true;
+  
+  *elapsed_count = 0;
+  // Read reply 1 byte at a time to get earliest tv_finish
+  while (true) {
+    ret = read(fd, buf, 1);
+    
+    if (ret < 0)
+	{		
+      return ZEUS_GETS_ERROR;
+    }
+    if (first)
 	{
-		ret = read(fd, buf, 1);
-		if (ret < 0)
-			return ZEUS_GETS_ERROR;
-
-		if (first)
-			cgtime(tv_finish);
-
-		if (ret >= read_amount)
-		{
-			return ZEUS_GETS_OK;
-		}
-
-		if (ret > 0) {
-			buf += ret;
-			read_amount -= ret;
-			first = false;
-			continue;
-		}
-			
-		if (thr && thr->work_restart) {
-			applog(LOG_DEBUG, "%s: Interrupted by work restart", __func__);
-			applog(LOG_DEBUG, "Zeus Read: Work restart at %.2f seconds", (float)(rc)/(float)ZEUS_TIME_FACTOR);
-			return ZEUS_GETS_RESTART;
-		}
-
-		rc++;
-		if (rc >= read_count) {
-			applog(LOG_DEBUG, "%s: No data in %.2f seconds", __func__,
-			       (float)rc/(float)ZEUS_TIME_FACTOR);
-			return ZEUS_GETS_TIMEOUT;
-		}
-	}
+      cgtime(tv_finish);
+    }
+    if (ret >= read_amount)
+	{
+      return ZEUS_GETS_OK;
+    }
+    if (ret > 0) {
+      buf += ret;
+      read_amount -= ret;
+      first = false;	
+      continue;
+    }
+    
+    rc++;
+    *elapsed_count=rc;
+    if (rc >= read_count) {
+      if (opt_debug) {
+	applog(LOG_DEBUG,
+	       "Zeus Read: No data in %.2f seconds",
+	       (float)rc/(float)ZEUS_TIME_FACTOR);
+      }
+      return ZEUS_GETS_TIMEOUT;
+    }
+    
+    if (thr && thr->work_restart) {
+      if (opt_debug) {
+	applog(LOG_DEBUG,
+	       "Zeus Read: Work restart at %.2f seconds",
+	       (float)(rc)/(float)ZEUS_TIME_FACTOR);
+      }
+      return ZEUS_GETS_RESTART;
+    }
+  }
 }
 
 static int zeus_write(int fd, const void *buf, size_t bufLen)
 {
-	if (opt_debug)
-	{
+	#if 0 //PMA: implement DEBUG command
 		char hex[(bufLen * 2) + 1];
 		bin2hex(hex, buf, bufLen);
 		applog(LOG_ERR, "fd=%d: HEX: %s", fd, hex);
-	}
+	#endif
 
 	size_t ret;
 	if (unlikely(fd == -1))
@@ -297,10 +306,10 @@ static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, stru
 		memset(nonce_bin, 0, sizeof(nonce_bin));
 	
 		uint32_t elapsed_count;
-		zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, info->read_size);
+		zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, &elapsed_count);
 		timersub(&tv_finish, &tv_start, &golden_tv);
 		//PMA: Re-Integration required
-		//zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, info->read_size);
+		//zeus_gets(nonce_bin, fd, &tv_finish, NULL, info->probe_read_count, &elapsed_count, ZEUS_NONCE_SIZE);
 	
 		bin2hex(nonce_hex, nonce_bin, sizeof(nonce_bin));
 		if (strncmp(nonce_hex, golden_nonce, 8))
@@ -330,10 +339,15 @@ static bool zeus_detect_custom(const char *devpath, struct device_drv *dev, stru
 	add_cgpu(zeus);	
 	zeus->device_data = info;
 	
-	applog(LOG_DEBUG, "Zeus %i at %s (Init: baud=%d, readcount=%d, bitnum=%d) with the following parameters:", zeus->device_id, devpath, baud, info->read_count, info->chips_bit_num);
-	applog(LOG_DEBUG, "[Speed] %iMHz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s]",
-		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000);
-	
+	applog(LOG_INFO, "Found %"PRIpreprv" at %s", zeus->proc_repr, devpath);
+	if(opt_debug)
+	{
+		applog(LOG_ERR, "Found %"PRIpreprv" at %s,  Init: baud=%d with the following parameters:", zeus->proc_repr, devpath, baud);
+		applog(LOG_ERR, "[Speed] %iMhz core|chip|board: [%ikH/s], [%ikH/s], [%ikH/s], readcount:%d, bitnum:%d",
+		info->chip_clk, info->core_hash/1000, info->chip_hash/1000, info->board_hash/1000, info->read_count, info->chips_bit_num);
+	}	
+	//PMA: FOR Testing should be LOG_INFO instead
+	applog(LOG_ERR, "Zeus %i on %s detected.", zeus->device_id, zeus->device_path);
 	zeus_close(fd);
 	return true;
 }
@@ -362,26 +376,26 @@ static bool zeus_detect_one(const char *devpath)
 	info->read_size = ZEUS_READ_SIZE;
 	info->probe_read_count = 50;
 	info->cores_perchip = ZEUS_CHIP_CORES;
-	//max clock 382MHz, min clock 200MHz
+	//max clock 381MHz, min clock 200MHz
 	if(info->chip_clk > 382)
 		info->chip_clk = 382;
 	else if(info->chip_clk < 200)
 		info->chip_clk = 200;
 	
 	if(info->chips_count > ZEUS_CHIPS_COUNT_MAX)
+	{
 		info->chips_count_max = zeus_update_num(info->chips_count);
-		
+	}
 	info->chips_bit_num = zeus_log_2(info->chips_count_max);
-	info->golden_speed_percore = (((info->chip_clk*2)/3)*1024)/8;
+	info->golden_speed_percore = (((info->chip_clk*2)/3)*1024)/8*1.1;
 
 	info->core_hash = info->golden_speed_percore;
 	info->chip_hash = info->golden_speed_percore*info->cores_perchip;
 	info->board_hash = info->golden_speed_percore*info->cores_perchip*info->chips_count;
 	
-	uint32_t read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
-	applog(LOG_DEBUG, "%s calculated ReadCount: %d", devpath, read_count);
+	int read_count = (uint32_t)((4294967296*10)/(info->cores_perchip*info->chips_count_max*info->golden_speed_percore*2));
 	if(read_count < info->read_count)
-		info->read_count = read_count;
+		info->read_count = read_count;//send a new work every 10 seconds
 	
 	if (!zeus_detect_custom(devpath, drv, info))
 	{
@@ -402,9 +416,8 @@ static bool zeus_prepare(struct thr_info *thr)
 {
 	struct cgpu_info *zeus = thr->cgpu; 
 	struct ZEUS_INFO *info = zeus->device_data;	
-	// PMA: Required first run? Think not. Has to be checked by rework
-	//struct ZEUS_STATE *state;
-	//thr->cgpu_data = state = calloc(1, sizeof(*state));
+	struct ZEUS_STATE *state;
+	thr->cgpu_data = state = calloc(1, sizeof(*state));
 	//state->firstrun = true;
 	
 	int fd = zeus_open2(zeus->device_path, info->baud, true);
@@ -425,6 +438,16 @@ static bool zeus_prepare(struct thr_info *thr)
 }
 
 
+static void zeus_transition_work(struct ZEUS_STATE *state, struct work *work)
+{
+	if ((state->last1_work == work) || (state->last2_work == work) || (state->last3_work == work))
+		return;
+	if (state->last3_work)
+		free_work(state->last3_work);
+	state->last3_work = state->last2_work;
+	state->last2_work = state->last1_work;
+	state->last1_work = copy_work(work);
+}
 
 
 static int64_t zeus_scanhash(struct thr_info *thr, struct work *work, __maybe_unused int64_t max_nonce)
@@ -434,6 +457,7 @@ static int64_t zeus_scanhash(struct thr_info *thr, struct work *work, __maybe_un
   int ret;
   
   struct ZEUS_INFO *info;
+  struct ZEUS_STATE *state = thr->cgpu_data;
   
   int numbytes = 84;				// KRAMBLE 84 byte protocol
 
@@ -519,13 +543,16 @@ if(diff < 1) diff = 1;
   uint32_t elapsed_count;
   uint32_t read_count = info->read_count;
 
-  while(1){		
-    ret = zeus_gets(nonce_bin, fd, &tv_finish, thr, read_count,info->read_size);
-    if (ret == ZEUS_GETS_ERROR) {
-      zeus_shutdown(thr);
-      applog(LOG_ERR, "%s%i: Comms error", zeus->drv->name, zeus->device_id);
-      dev_error(zeus, REASON_DEV_COMMS_ERROR);
-      return 0;
+  while(1)
+{		
+    ret = zeus_gets(nonce_bin, fd, &tv_finish, thr, read_count,&elapsed_count);
+    if (ret == ZEUS_GETS_ERROR) 
+	{
+		zeus_transition_work(state, work);
+		zeus_shutdown(thr);
+		applog(LOG_ERR, "%s%i: Comms error", zeus->drv->name, zeus->device_id);
+		dev_error(zeus, REASON_DEV_COMMS_ERROR);
+		return 0;
     }
 
 #ifndef WIN32
@@ -536,90 +563,93 @@ if(diff < 1) diff = 1;
     work->blk.nonce = 0xffffffff;
 
     // aborted before becoming idle, get new work
-    if (ret == ZEUS_GETS_TIMEOUT || ret == ZEUS_GETS_RESTART) {
+    if (ret == ZEUS_GETS_TIMEOUT || ret == ZEUS_GETS_RESTART) 
+	{
+		if (opt_debug) 
+			applog(LOG_ERR, "1restart or 2timeout:%d ",ret);
+
+		timersub(&tv_finish, &tv_start, &elapsed);
       
-      if (opt_debug&1) {
-	applog(LOG_ERR, "1restart or 2timeout:%d ",ret);
-      }
+		estimate_hashes = ((double)(elapsed.tv_sec) + ((double)(elapsed.tv_usec))/((double)1000000))
+			* info->golden_speed_percore*info->chips_count*info->cores_perchip;
 
-      timersub(&tv_finish, &tv_start, &elapsed);
-      
-      estimate_hashes = ((double)(elapsed.tv_sec) + ((double)(elapsed.tv_usec))/((double)1000000))
-	* info->golden_speed_percore*info->chips_count*info->cores_perchip;
-
-      if (unlikely(estimate_hashes > 0xffffffff))
-	estimate_hashes = 0xffffffff;
-
-      return estimate_hashes;
+		if (unlikely(estimate_hashes > 0xffffffff))
+			estimate_hashes = 0xffffffff;
+			
+		zeus_transition_work(state, work);
+		return estimate_hashes;
     }
 
-	/* Useless?????
-    if(read_count>elapsed_count){
+    if(read_count>elapsed_count)
+	{
       read_count -= elapsed_count;
     }
-    else {
+    else 
+	{
       read_count=0;
     }
-*/
+
     memcpy((char *)&nonce, nonce_bin, sizeof(nonce_bin));
     //rev(nonce_bin,4);
 #if !defined (__BIG_ENDIAN__) && !defined(MIPSEB)
     nonce = swab32(nonce);
 #endif
 
-    curr_hw_errors = zeus->hw_errors;
-    submit_nonce(thr, work, nonce);  
-    was_hw_error = (curr_hw_errors < zeus->hw_errors);
+		curr_hw_errors = zeus->hw_errors; 		
+		if ((state->last1_work) && (test_nonce(state->last1_work, nonce, false)))
+			submit_nonce(thr, state->last1_work, nonce);
+		else if((state->last2_work) && (test_nonce(state->last2_work, nonce, false)))
+			submit_nonce(thr, state->last2_work, nonce);
+		else if((state->last3_work) && (test_nonce(state->last3_work, nonce, false)))
+			submit_nonce(thr, state->last3_work, nonce);
+		else
+			submit_nonce(thr, work, nonce);
+    
  
-    if (was_hw_error){			
-      //zeus_flush_uart(fd);
-	  applog(LOG_ERR, "HW Error of calculating nonce: %08x ", nonce);
-      if (opt_debug&&1) {
-	applog(LOG_ERR, "ERR nonce:%08x ",nonce);
-      }
-    }
-    else {			
-      if (opt_debug&&0) {
-#if ZEUS_CHIP_GEN==1
-	uint32_t chip_index=zeus_get_revindex(nonce,info->chips_bit_num);
-				uint32_t core_index=(nonce&0xe0000000)>>29;
-#else
-#error
-#endif
+		if (curr_hw_errors < zeus->hw_errors)
+		{			
+		  zeus_flush_uart(fd);
+		  applog(LOG_ERR, "HW Error of calculating nonce: %08x ", nonce);
 
-	applog(LOG_ERR, "nonce:%08x,chip_index:%d ",nonce,chip_index);
-      }			
-    }
+		}
+		else 
+		{			
+			if (opt_debug) 
+			{
+				#if ZEUS_CHIP_GEN==1
+					uint32_t chip_index=zeus_get_revindex(nonce,info->chips_bit_num);
+					uint32_t core_index=(nonce&0xe0000000)>>29;
+				#else
+				#error
+				#endif
 
-  }
+				applog(LOG_ERR, "nonce:%08x,chip_index:%d ",nonce,chip_index);
+			}			
+		}
+		zeus_transition_work(state, work);
+}
 }
 
 
-// PMA: test for support of --set-device
+// support of --set-device
 static const char *zeus_set_chip_clk(struct cgpu_info * const device, const char * const option, const char * const setting, char * const replybuf, enum bfg_set_device_replytype * const success)
 {
 	struct ZEUS_INFO * const info = device->device_data;
-
 	info->chip_clk = atoi(setting);
-
 	return NULL;
 }
 
 static const char *zeus_set_chips_count(struct cgpu_info * const device, const char * const option, const char * const setting, char * const replybuf, enum bfg_set_device_replytype * const success)
 {
 	struct ZEUS_INFO * const info = device->device_data;
-
 	info->chips_count = atoi(setting);
-
 	return NULL;
 }
 
 static const char *zeus_set_read_count(struct cgpu_info * const device, const char * const option, const char * const setting, char * const replybuf, enum bfg_set_device_replytype * const success)
 {
 	struct ZEUS_INFO * const info = device->device_data;
-
 	info->read_count = atoi(setting);
-
 	return NULL;
 }
 
