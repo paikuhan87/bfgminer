@@ -15,7 +15,7 @@ dnl * any later version.  See COPYING for more details.
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [4])
-m4_define([v_min], [3])
+m4_define([v_min], [4])
 m4_define([v_mic], [1])
 m4_define([v_rev], [ZeusMiner])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
@@ -185,6 +185,7 @@ case $target in
     use_udevrules=false
     ;;
 	*-*-darwin*)
+		LDFLAGS="$LDFLAGS -framework IOKit -framework CoreFoundation"
 		have_macho=true
     use_udevrules=false
 		;;
@@ -1062,6 +1063,20 @@ if test "x$hashfast" = xyes; then
 	have_udevrules=true
 fi
 AM_CONDITIONAL([USE_HASHFAST], [test x$hashfast = xyes])
+
+
+driverlist="$driverlist jingtian"
+AC_ARG_ENABLE([jingtian],
+	[AC_HELP_STRING([--enable-jingtian],[Compile support for JingTian (default disabled)])],
+	[jingtian=$enableval],
+	[jingtian=$ddno]
+	)
+if test "x$jingtian" = "xyes"; then
+	AC_DEFINE([USE_JINGTIAN], [1], [Defined to 1 if JingTian support is wanted])
+	need_lowl_spi=yes
+	has_asic=yes
+fi
+AM_CONDITIONAL([USE_JINGTIAN], [test x$jingtian = xyes])
 
 
 driverlist="$driverlist metabank"

@@ -151,6 +151,7 @@ struct pool;
 enum dev_reason;
 struct cgpu_info;
 
+
 extern void set_cloexec_socket(SOCKETTYPE, bool cloexec);
 
 static inline
@@ -718,6 +719,9 @@ struct timeval *select_timeout(struct timeval *tvp_timeout, struct timeval *tvp_
 }while(0)
 
 #define _SNP(...)  _SNP2(snprintf, __VA_ARGS__)
+
+
+extern int double_find_precision(double, double base);
 
 
 #define REPLACEMENT_CHAR (0xFFFD)

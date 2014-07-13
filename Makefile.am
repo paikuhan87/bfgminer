@@ -76,6 +76,13 @@ bfgminer_SOURCES += miner.h compat.h  \
 		   sha2.c sha2.h api.c
 EXTRA_bfgminer_DEPENDENCIES =
 
+.PHONY: update-version
+update-version:
+	./gen-version.sh >version.h.new
+	cmp version.h version.h.new && rm version.h.new || mv version.h.new version.h
+version.h: update-version
+bfgminer_SOURCES += version.h
+
 SUBDIRS += $(LIBBLKMAKER_SUBDIRS)
 LIBBLKMAKER_SUBDIRS =
 if NEED_LIBBLKMAKER
@@ -329,6 +336,11 @@ endif
 
 if USE_HASHFAST
 bfgminer_SOURCES += driver-hashfast.c
+endif
+
+if USE_JINGTIAN
+bfgminer_SOURCES += driver-aan.c driver-aan.h
+bfgminer_SOURCES += driver-jingtian.c
 endif
 
 if USE_ROCKMINER
