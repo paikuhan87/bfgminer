@@ -4,8 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define WORK2D_MAX_DIVISIONS  255
-
 extern int work2d_xnonce1sz;
 extern int work2d_xnonce2sz;
 

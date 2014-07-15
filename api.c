@@ -35,7 +35,6 @@
 #include "util.h"
 #include "driver-cpu.h" /* for algo_names[], TODO: re-factor dependency */
 #include "driver-opencl.h"
-#include "version.h"
 
 #define HAVE_AN_FPGA 1
 

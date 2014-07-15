@@ -31,28 +31,33 @@ int opt_pll_freq;
 #define GC3355_BLADE_DEFAULT_CHIPS	40
 #define GC3355_READ_SIZE          12
 
-struct gc3355_info
+struct gc3355_orb_info
 {
 	uint16_t freq;
-	unsigned chips;
+	uint8_t chips;
 	struct timeval scanhash_time;
 };
 
 #define gc3355_open(path)  serial_open(path, 115200, 1, true)
 #define gc3355_close(fd)  serial_close(fd)
 
-extern ssize_t gc3355_read(int fd, char *buf, size_t size);
+extern int gc3355_read(int fd, char *buf, size_t size);
 extern ssize_t gc3355_write(int fd, const void * const buf, const size_t size);
 
-extern void gc3355_init_miner(int fd, int pll_freq);
-extern void gc3355_init_dualminer(int fd, int pll_freq, bool scrypt_only, bool detect_only);
+extern void gc3355_init_usborb(int fd, int pll_freq, bool scrypt_only, bool detect_only);
+
+extern
+void gc3355_reset_dtr(int fd);
+
+extern void gc3355_init_usbstick(int fd, int pll_freq, bool scrypt_only, bool detect_only);
 
 extern void gc3355_scrypt_reset(int fd);
-extern void gc3355_scrypt_only_reset(int fd);
+
+extern
+void gc3355_scrypt_only_reset(int fd);
 
 extern void gc3355_scrypt_prepare_work(unsigned char cmd[156], struct work *);
-extern void gc3355_sha2_prepare_work(unsigned char cmd[52], struct work *);
-
+extern void gc3355_sha2_prepare_work(unsigned char cmd[52], struct work *, bool simple);
 extern int64_t gc3355_get_firmware_version(int fd);
 extern void gc3355_set_pll_freq(int fd, int pll_freq);
 
