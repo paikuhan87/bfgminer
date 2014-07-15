@@ -200,7 +200,7 @@ int zeus_excess_nonce_size(int fd, struct ZEUS_INFO *info)
 }
 
 //Calculates the target difficulty
-static double target_diff(const unsigned char *target)
+static double target_diff_zeus(const unsigned char *target)
 {
 	uint64_t *data64, d64;
 	char rtarget[32];

@@ -53,6 +53,8 @@ lib/stdint.h
 lib/warn-on-use.h
 iospeeds_local.h
 
+version.h.new
+
 mkinstalldirs
 
 .pc
